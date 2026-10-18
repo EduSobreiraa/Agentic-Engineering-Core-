@@ -108,11 +108,18 @@ class CodexCliAdapter(ExecutionAdapter):
         started = datetime.now(timezone.utc)
         if self.executable is None:
             raise FileNotFoundError("Codex CLI is not installed")
-        args = [self.executable, "exec", "--json", "--sandbox", request.sandbox_mode]
+        args = [
+            self.executable,
+            "exec",
+            "--json",
+            "--sandbox",
+            request.sandbox_mode,
+            "--skip-git-repo-check",
+        ]
         if provider_session_id:
             args.extend(["resume", provider_session_id, "-"])
         else:
-            args.extend(["--skip-git-repo-check", "-"])
+            args.append("-")
         process = await asyncio.create_subprocess_exec(
             *args,
             cwd=request.working_directory,

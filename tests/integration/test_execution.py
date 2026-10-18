@@ -46,6 +46,43 @@ def fake_codex(tmp_path: Path) -> Path:
     return script
 
 
+def test_resume_keeps_non_git_workspace_allowed(
+    fake_codex: Path, tmp_path: Path
+) -> None:
+    fake_codex.write_text(
+        fake_codex.read_text().replace(
+            "prompt = sys.stdin.read()",
+            "if 'resume' in sys.argv and '--skip-git-repo-check' "
+            "not in sys.argv: sys.exit(2)\n"
+            "prompt = sys.stdin.read()",
+        )
+    )
+    adapter = CodexCliAdapter(str(fake_codex))
+    request = ExecutionRequest(
+        execution_id="first",
+        run_id="run",
+        task_id="task",
+        agent_id="implementer",
+        executor="codex",
+        prompt="first",
+        working_directory=tmp_path,
+        sandbox_mode="read-only",
+    )
+
+    async def run() -> None:
+        first = await adapter.execute(request)
+        assert first.status == ExecutionStatus.SUCCEEDED
+        assert first.session_id is not None
+        second = await adapter.execute(
+            request.model_copy(update={"execution_id": "second", "prompt": "second"}),
+            first.session_id,
+        )
+        assert second.status == ExecutionStatus.SUCCEEDED
+        assert second.output == "Reply: second"
+
+    asyncio.run(run())
+
+
 def test_two_agents_exchange_over_acp(fake_codex: Path, tmp_path: Path) -> None:
     database = tmp_path / "aec.sqlite"
     history = asyncio.run(

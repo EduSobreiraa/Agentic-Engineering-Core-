@@ -39,11 +39,11 @@ Cada item tem um identificador estável para vincular issues, commits e evidênc
 - [x] F2-04 Executar tarefas não interativas. Evidência: `exec --json` confirmado na CLI 0.163.0; dois turnos reais read-only no demo de workflow em 2026-10-18.
 - [x] F2-05 Capturar respostas e resultados estruturados. Evidência: testes do parser JSONL e resultados reais persistidos no run `5df4cc7c-48cd-4d4b-90c5-5e5db4a0e0d3`.
 - [x] F2-06 Implementar timeouts e tratamento de falhas. Evidência: testes de timeout e estados.
-- [x] F2-07 Investigar persistência e retomada de sessões Codex. Evidência: `exec resume --help`, tabela `agent_sessions`; retomada real pendente.
+- [x] F2-07 Investigar persistência e retomada de sessões Codex. Evidência: `agent_sessions`, teste do adapter e dois turnos Codex reais somente leitura com o mesmo vínculo interno de sessão em 2026-10-18.
 - [ ] F2-08 Implementar isolamento de diretórios e worktrees. Diretórios distintos e trava por manager implementados; worktrees automáticos e coordenação entre processos pendentes.
 - [x] F2-09 Testar troca de resultados entre duas execuções Codex. Evidência: cenário ACP com executável falso e troca real de plano para implementação no run `5df4cc7c-48cd-4d4b-90c5-5e5db4a0e0d3`.
 
-**Estado:** execução e troca via ACP verificadas com dois turnos Codex reais read-only. Retomada de sessão real, worktrees automáticos e isolamento entre processos continuam pendentes.
+**Estado:** execução, troca via ACP e retomada de sessão verificadas com Codex real somente leitura. Worktrees automáticos na Execution Layer e isolamento entre processos continuam pendentes.
 
 ## Fase 3: workflows
 
