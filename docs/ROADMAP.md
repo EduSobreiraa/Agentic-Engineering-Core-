@@ -96,7 +96,16 @@ Cada item tem um identificador estável para vincular issues, commits e evidênc
 - [x] F6-06 Publicar novas versões somente após aprovação. Evidência: publicação transacional, `WorkflowEngine.create_published()` e seleção de versão publicada compatível pelo `AdversarialLoop`, com gate anterior ao QA e vínculo persistido.
 - [x] F6-07 Preservar histórico das decisões. Evidência: `methodology_events`, hashes, versões e vínculos de execução.
 
-**Estado:** o ciclo supervisionado funciona com fixtures e workflows declarativos, integrado ao Documentation Worker da Fase 5. O `AdversarialLoop` seleciona versões publicadas da topologia adversarial suportada e executa gates anteriores ao QA. O avaliador ainda não executa benchmarks controlados por conta própria. Versões sem manifesto documental deixam essa métrica indisponível.
+**Estado:** funcional no ambiente local supervisionado, com validação e endurecimento pendentes. O ciclo usa fixtures e workflows declarativos, integrado ao Documentation Worker da Fase 5. O `AdversarialLoop` seleciona versões publicadas da topologia adversarial suportada e executa gates anteriores ao QA. O avaliador ainda não executa benchmarks controlados por conta própria. Versões sem manifesto documental deixam essa métrica indisponível. A suíte registrada em `.audit/verification.txt` passou com 122 testes e dois cenários Codex opt-in ignorados; `.audit/real-codex-verification.txt` registra os dois cenários opt-in aprovados. Esses resultados não validam um ciclo completo entre processos independentes.
+
+## Fechamento da Fase 6 antes da Fase 7
+
+- [ ] F6H-01 Hardening multiprocesso (P0). Testar dois processos Python com o mesmo SQLite: ACP, workers, locks, transições, falha abrupta, recuperação e ausência de efeitos duplicados nos casos com resultado conhecido. Resultado externo incerto continua `INTERRUPTED`.
+- [ ] F6H-02 Benchmark Runner mínimo (P1). Executar tarefas de referência equivalentes nas versões base e candidata, com critérios e condições fixados, ambientes separados e métricas obtidas das execuções. Tratar resultados pequenos como exploratórios.
+- [ ] F6H-03 Segurança operacional (P0). Documentar e impor o bloqueio de código e projetos não confiáveis até existir sandbox de sistema operacional adequado. Manter fluxos locais confiáveis supervisionados.
+- [ ] F6H-04 Identidade remota (P2). Registrar requisitos de autenticação para aprovação remota, sem implementá-la nesta etapa.
+
+O [prompt de fechamento](methodology-worker/PHASE_6_CLOSURE_PROMPT.md) detalha o escopo e os critérios de aceite. Não iniciar a Fase 7 antes de concluir F6H-01 a F6H-03. F6H-04 permanece como requisito documentado para uma futura interface remota.
 
 ## Fase 7: expansão metodológica
 
