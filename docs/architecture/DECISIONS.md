@@ -121,3 +121,13 @@ Estas decisões foram aceitas no escopo inicial. Mudanças futuras devem acresce
 **Decisão:** `AdversarialLoop` persiste a iteração e executa cada papel por um workflow `dev-adversarial@1.0.0` separado. O Execution Manager continua sendo a única ponte com adapters. Commits e worktrees locais são capturados pelo núcleo; o QA revisa snapshot separado. Gates são comandos registrados pelo projeto, e o pedido de aprovação usa o passo humano da Fase 3. Critérios, limite e configuração de gates são fixados na execução.
 
 **Efeito:** outros workflows não precisam seguir essa metodologia. Worktrees não são isolamento de segurança em nível de sistema operacional. Resultado externo incerto bloqueia retomada automática; não há merge ou push automático. A integração real com dois Codex e recuperação de commits capturados imediatamente antes de falha SQLite exigem verificação posterior.
+
+## ADR-013: Propostas imutáveis e publicação transacional
+
+**Estado:** aceito em 2026-10-18 para a implementação inicial da Fase 6.
+
+**Contexto:** a Fase 5 ainda não fornece o Documentation Worker completo. O ciclo adversarial fixa `1.0.0` em código. O ACP já possui um tipo de proposta, mas sua mensagem não comprova aprovação.
+
+**Decisão:** a Fase 6 grava propostas, avaliações, decisões, versões e vínculos no SQLite existente. O hash da proposta fixa o conteúdo avaliado e aprovado. O worker recebe somente interfaces de observação e proposta. Uma ação local de `MethodologyGovernance`, com ator presente em `local_approvers`, registra a aprovação. Uma transação publica a versão e altera a referência ativa. O único operador declarativo inicial adiciona `type_check` antes de QA. O Workflow Engine pode selecionar uma definição publicada por `create_published()`.
+
+**Efeito:** a publicação rejeita versão-base obsoleta, dependência ausente e aprovação inválida. Repetir a mesma publicação não cria outra versão. O mecanismo de identidade conserva o limite local da Fase 3. A adoção pelo `AdversarialLoop` e um benchmark executado pelo AEC continuam pendentes. O renderizador documental mínimo não encerra a Fase 5.

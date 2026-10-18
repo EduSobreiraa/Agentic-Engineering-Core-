@@ -20,6 +20,7 @@ from aec.communication.schemas import (
 )
 from aec.execution.manager import ExecutionManager
 from aec.execution.models import ExecutionRequest, ExecutionResult, ExecutionStatus
+from aec.methodology.governance import MethodologyRegistry
 from aec.security.identities import Identity, Role
 
 from .loader import validate
@@ -98,6 +99,18 @@ class WorkflowEngine:
         run = self.repository.create(run_id or str(uuid4()), definition)
         self.repository.workflow_status(run.run_id, WorkflowStatus.VALIDATED)
         return self.repository.get_run(run.run_id)
+
+    def create_published(
+        self,
+        registry: MethodologyRegistry,
+        methodology_id: str,
+        version: str,
+        run_id: str | None = None,
+    ) -> WorkflowRun:
+        definition = registry.get(methodology_id, version).definition
+        run = self.create(definition, run_id)
+        registry.bind_run(run.run_id, methodology_id, version)
+        return run
 
     def _ready(
         self, definition: WorkflowDefinition, steps: dict[str, StepRun]

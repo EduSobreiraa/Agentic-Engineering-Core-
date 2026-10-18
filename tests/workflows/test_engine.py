@@ -9,6 +9,8 @@ from aec.communication.broker import Broker
 from aec.execution.base import ExecutionAdapter
 from aec.execution.manager import ExecutionManager
 from aec.execution.models import ExecutionRequest, ExecutionResult, ExecutionStatus
+from aec.methodology.contracts import MethodologyVersion
+from aec.methodology.governance import MethodologyRegistry
 from aec.security.identities import Role
 from aec.workflows.engine import TransientValidationError, WorkflowEngine
 from aec.workflows.loader import WorkflowDefinitionError, load, validate
@@ -66,6 +68,30 @@ def setup_engine(tmp_path: Path) -> tuple[WorkflowEngine, SimulatedAdapter]:
 
 def example() -> WorkflowDefinition:
     return load(Path(__file__).parents[2] / "docs/workflows/example.yaml")
+
+
+def test_create_from_published_methodology(tmp_path: Path) -> None:
+    engine, _ = setup_engine(tmp_path)
+    definition = example()
+    registry = MethodologyRegistry(
+        engine.broker.db, validators=frozenset({"artifact-check"})
+    )
+    registry.seed(
+        MethodologyVersion(
+            methodology_id=definition.id,
+            version=definition.version,
+            definition=definition,
+            mandatory_gates=frozenset({"artifact-check"}),
+        ),
+        actor="bootstrap",
+    )
+    run = engine.create_published(registry, definition.id, definition.version)
+    with engine.broker.db.connect() as connection:
+        binding = connection.execute(
+            "SELECT version FROM methodology_run_bindings WHERE run_id=?",
+            (run.run_id,),
+        ).fetchone()
+    assert binding["version"] == "1.0.0"
 
 
 def test_complete_persisted_workflow_and_recovery(tmp_path: Path) -> None:

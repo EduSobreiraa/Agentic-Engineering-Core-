@@ -121,6 +121,31 @@ MIGRATIONS = (
         PRIMARY KEY(run_id, number)
     );
     """,
+    """
+    CREATE TABLE methodology_versions (
+        methodology_id TEXT NOT NULL, version TEXT NOT NULL,
+        definition TEXT NOT NULL, sha256 TEXT NOT NULL,
+        published_at TEXT NOT NULL, approved_by TEXT NOT NULL,
+        proposal_id TEXT, PRIMARY KEY(methodology_id, version)
+    );
+    CREATE TABLE methodology_active (
+        methodology_id TEXT PRIMARY KEY, version TEXT NOT NULL
+    );
+    CREATE TABLE methodology_proposals (
+        proposal_id TEXT PRIMARY KEY, content TEXT NOT NULL,
+        sha256 TEXT NOT NULL, status TEXT NOT NULL,
+        evaluation TEXT, approval_by TEXT, approval_at TEXT
+    );
+    CREATE TABLE methodology_events (
+        event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        proposal_id TEXT NOT NULL, kind TEXT NOT NULL,
+        actor TEXT, detail TEXT, created_at TEXT NOT NULL
+    );
+    CREATE TABLE methodology_run_bindings (
+        run_id TEXT PRIMARY KEY, methodology_id TEXT NOT NULL,
+        version TEXT NOT NULL, sha256 TEXT NOT NULL
+    );
+    """,
 )
 
 

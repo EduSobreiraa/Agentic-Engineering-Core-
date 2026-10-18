@@ -49,6 +49,10 @@ docs/ROADMAP.md           tarefas e critérios por fase
 
 O [roadmap](docs/ROADMAP.md) registra o progresso. A [arquitetura](docs/architecture/ARCHITECTURE.md) define limites e invariantes; [componentes](docs/architecture/COMPONENTS.md) distribui responsabilidades; [decisões](docs/architecture/DECISIONS.md) registra escolhas aceitas. A [especificação ACP](docs/protocols/ACP_SPEC.md) descreve o contrato implementado. As [instruções de contribuição](AGENTS.md) valem também para agentes que trabalham neste repositório.
 
+## Governança metodológica
+
+A Fase 6 inicial lê históricos tipados, calcula métricas, gera RFCs, avalia propostas e publica versões após decisão humana local. Execute `uv run pytest -q tests/scenarios/test_methodology_evolution.py` para o cenário controlado. Veja o [diagnóstico e os limites](docs/methodology-worker/ARCHITECTURE.md). O Documentation Worker da Fase 5 ainda não está completo; o controlador adversarial da Fase 4 continua fixo em `1.0.0`.
+
 ## Limites atuais
 
 O ACP v0.1 permanece independente de executores. A Execution Layer inicia processos e guarda estados. O Workflow Engine coordena grafos acíclicos; o ciclo adversarial controla repetições limitadas usando seus workflows. Execute `uv run pytest -q tests/scenarios/test_adversarial_loop.py` para o cenário simulado. Veja [o ciclo e suas limitações](docs/engineering/ADVERSARIAL_LOOP.md). Handles e aprovação local não autenticam usuários entre máquinas. Reinícios não repetem turnos externos de resultado incerto. Use um único manager ativo por banco. A Fase 4 ainda não foi validada com dois Codex reais.
