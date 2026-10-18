@@ -4,7 +4,7 @@ O motor executa grafos acíclicos definidos em YAML. `load()` valida o arquivo; 
 
 As etapas `agent` passam pelo `ExecutionManager`: o motor publica `TASK_ASSIGNED` no ACP e o manager executa o adapter, guarda o resultado e publica `ARTIFACT_SUBMITTED` quando há sucesso. Falhas do workflow publicam `TASK_FAILED` para uma identidade `QUALITY_GATE`, com ID determinístico para evitar duplicação. `validation` chama uma função Python registrada que retorna `bool` e publica `VALIDATION_RESULT` no ACP. `human_approval` registra o pedido no SQLite e suspende o fluxo. O texto de um agente não concede autorização nem aprova uma etapa.
 
-O banco compartilhado guarda a definição, seu hash SHA-256, estados, tentativas, aprovações e eventos. Consulte [esquema](WORKFLOW_SCHEMA.md), [estados](STATE_MACHINE.md) e [recuperação](RECOVERY_AND_RETRIES.md). O motor é um componente local: instale um único manager ativo por banco. Não há coordenação distribuída nem interface gráfica.
+O banco compartilhado guarda a definição, seu hash SHA-256, estados, tentativas, aprovações e eventos. Consulte [esquema](WORKFLOW_SCHEMA.md), [estados](STATE_MACHINE.md) e [recuperação](RECOVERY_AND_RETRIES.md). O manager coordena execuções por travas locais; instale um único motor ativo por workflow. Não há coordenação distribuída nem interface gráfica.
 
 ## Integração
 

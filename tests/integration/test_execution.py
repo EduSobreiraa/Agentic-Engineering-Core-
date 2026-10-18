@@ -1,5 +1,7 @@
 import asyncio
 import json
+import subprocess
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
@@ -16,6 +18,7 @@ from aec.communication.schemas import (
 from aec.execution.adapters.codex_cli import CodexCliAdapter
 from aec.execution.base import ExecutionAdapter
 from aec.execution.demo import _send, run_demo
+from aec.execution.locking import LocalLock
 from aec.execution.manager import ExecutionManager
 from aec.execution.models import ExecutionRequest, ExecutionResult, ExecutionStatus
 from aec.execution.repository import ExecutionRepository
@@ -218,7 +221,10 @@ def test_adapter_cancel(fake_codex: Path, tmp_path: Path) -> None:
     asyncio.run(scenario())
 
 
-def test_manager_serializes_same_workspace(tmp_path: Path) -> None:
+@pytest.mark.parametrize("separate_managers", [False, True])
+def test_manager_serializes_same_workspace(
+    tmp_path: Path, separate_managers: bool
+) -> None:
     class CountingAdapter(ExecutionAdapter):
         def __init__(self) -> None:
             self.active = 0
@@ -253,6 +259,11 @@ def test_manager_serializes_same_workspace(tmp_path: Path) -> None:
     implementer = broker.register("implementer", Role.IMPLEMENTER)
     adapter = CountingAdapter()
     manager = ExecutionManager(broker, {"fake": adapter}, [tmp_path])
+    other_manager = (
+        ExecutionManager(broker, {"fake": adapter}, [tmp_path])
+        if separate_managers
+        else manager
+    )
     messages = [
         _send(
             broker,
@@ -269,7 +280,7 @@ def test_manager_serializes_same_workspace(tmp_path: Path) -> None:
     async def scenario() -> None:
         results = await asyncio.gather(
             *(
-                manager.execute(
+                selected.execute(
                     ExecutionRequest(
                         execution_id=str(uuid4()),
                         run_id="run",
@@ -282,13 +293,107 @@ def test_manager_serializes_same_workspace(tmp_path: Path) -> None:
                     implementer,
                     message.message_id,
                 )
-                for message in messages
+                for selected, message in zip(
+                    (manager, other_manager), messages, strict=True
+                )
             )
         )
         assert all(result.status == ExecutionStatus.SUCCEEDED for result in results)
 
     asyncio.run(scenario())
     assert adapter.peak == 1
+
+
+def test_restarting_manager_does_not_interrupt_active_execution(tmp_path: Path) -> None:
+    class PausingAdapter(ExecutionAdapter):
+        def __init__(self) -> None:
+            self.started = asyncio.Event()
+            self.release = asyncio.Event()
+
+        async def healthcheck(self) -> bool:
+            return True
+
+        async def cancel(self, execution_id: str) -> bool:
+            return False
+
+        async def execute(
+            self, request: ExecutionRequest, provider_session_id: str | None = None
+        ) -> ExecutionResult:
+            self.started.set()
+            await self.release.wait()
+            now = datetime.now(timezone.utc)
+            return ExecutionResult(
+                execution_id=request.execution_id,
+                agent_id=request.agent_id,
+                status=ExecutionStatus.SUCCEEDED,
+                output="done",
+                started_at=now,
+                finished_at=now,
+            )
+
+    broker = Broker(tmp_path / "aec.sqlite")
+    orchestrator = broker.register("orchestrator", Role.ORCHESTRATOR)
+    implementer = broker.register("implementer", Role.IMPLEMENTER)
+    message = _send(
+        broker,
+        orchestrator,
+        implementer,
+        MessageType.TASK_ASSIGNED,
+        {"title": "task", "instructions": "done"},
+        "run",
+        "task",
+    )
+    adapter = PausingAdapter()
+    manager = ExecutionManager(broker, {"fake": adapter}, [tmp_path])
+    request = ExecutionRequest(
+        execution_id="active",
+        run_id="run",
+        task_id="task",
+        agent_id="implementer",
+        executor="fake",
+        prompt="done",
+        working_directory=tmp_path,
+    )
+
+    async def scenario() -> None:
+        task = asyncio.create_task(
+            manager.execute(request, implementer, message.message_id)
+        )
+        await adapter.started.wait()
+        restarted = ExecutionManager(broker, {"fake": adapter}, [tmp_path])
+        assert restarted.repository.get("active") == ExecutionStatus.RUNNING
+        adapter.release.set()
+        assert (await task).status == ExecutionStatus.SUCCEEDED
+
+    asyncio.run(scenario())
+
+
+def test_execution_lock_is_visible_to_another_process(tmp_path: Path) -> None:
+    database = str(tmp_path / "aec.sqlite")
+    lock = LocalLock(database, "workspace:shared")
+    assert lock.try_acquire()
+    check = (
+        "from aec.execution.locking import LocalLock; "
+        f"lock=LocalLock({database!r}, 'workspace:shared'); "
+        "print(lock.try_acquire()); lock.close()"
+    )
+    try:
+        result = subprocess.run(
+            [sys.executable, "-c", check],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        assert result.stdout.strip() == "False"
+    finally:
+        lock.close()
+    result = subprocess.run(
+        [sys.executable, "-c", check],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert result.stdout.strip() == "True"
 
 
 def test_workspace_write_requires_manager_grant(tmp_path: Path) -> None:

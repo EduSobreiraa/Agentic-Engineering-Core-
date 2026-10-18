@@ -25,6 +25,7 @@ from aec.engineering.models import QAReviewResult
 from aec.security.identities import Identity, Role
 
 from .base import ExecutionAdapter
+from .locking import held
 from .models import AgentSession, ExecutionRequest, ExecutionResult, ExecutionStatus
 from .repository import ExecutionRepository
 
@@ -111,6 +112,18 @@ class ExecutionManager:
         source_message_id: str,
     ) -> ExecutionResult:
         source = self._authorize(request, identity, source_message_id)
+        async with held(self.broker.db.path, f"execution:{request.execution_id}"):
+            return await self._execute_authorized(
+                request, identity, source_message_id, source
+            )
+
+    async def _execute_authorized(
+        self,
+        request: ExecutionRequest,
+        identity: Identity,
+        source_message_id: str,
+        source: Message,
+    ) -> ExecutionResult:
         adapter = self.adapters.get(request.executor)
         if adapter is None:
             raise ValueError("executor is not registered")
@@ -140,7 +153,11 @@ class ExecutionManager:
         workspace_lock = self._workspaces.setdefault(
             request.working_directory, asyncio.Lock()
         )
-        async with self._slots, workspace_lock:
+        async with (
+            self._slots,
+            workspace_lock,
+            held(self.broker.db.path, f"workspace:{request.working_directory}"),
+        ):
             self.repository.status(request.execution_id, ExecutionStatus.STARTING)
             try:
                 if not await adapter.healthcheck():

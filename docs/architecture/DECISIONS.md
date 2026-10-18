@@ -161,3 +161,13 @@ Estas decisões foram aceitas no escopo inicial. Mudanças futuras devem acresce
 **Decisão:** `MethodologyVersion.required_documents` declara um subconjunto dos tipos documentais existentes. A observação conta apenas registros válidos com conteúdo e artefato íntegros vinculados à execução. Uma versão sem manifesto mantém a métrica indisponível, sem transformar ausência de requisito em zero.
 
 **Efeito:** versões antigas continuam legíveis. Versões com manifesto produzem numerador e denominador determinísticos; o manifesto é herdado por uma versão candidata.
+
+## ADR-017: Coordenação local de execuções entre managers
+
+**Estado:** implementado em 2026-10-18; atualiza o limite operacional das ADR-008 e ADR-010.
+
+**Contexto:** travas em memória não impediam que dois managers executassem no mesmo workspace, e um manager novo podia marcar como interrompido um turno ainda ativo no outro.
+
+**Decisão:** cada execução mantém uma trava POSIX de arquivo até a persistência do resultado; cada workspace tem outra trava durante a chamada ao adapter. A reconciliação marca `INTERRUPTED` somente quando consegue adquirir a trava da execução. As travas ficam ao lado do SQLite e permitem paralelismo entre workspaces distintos. O controller adversarial cria worktrees; o manager genérico recebe um diretório já existente.
+
+**Efeito:** managers no mesmo sistema de arquivos local não executam simultaneamente no mesmo workspace nem interrompem um turno com dono ativo. O scheduler de workflow e o controller adversarial não ganharam coordenação entre processos; cada run ainda requer um único scheduler ativo. Não há garantia de lock em armazenamento remoto ou Windows.

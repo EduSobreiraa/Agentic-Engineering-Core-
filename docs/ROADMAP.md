@@ -40,10 +40,10 @@ Cada item tem um identificador estável para vincular issues, commits e evidênc
 - [x] F2-05 Capturar respostas e resultados estruturados. Evidência: testes do parser JSONL e resultados reais persistidos no run `5df4cc7c-48cd-4d4b-90c5-5e5db4a0e0d3`.
 - [x] F2-06 Implementar timeouts e tratamento de falhas. Evidência: testes de timeout e estados.
 - [x] F2-07 Investigar persistência e retomada de sessões Codex. Evidência: `agent_sessions`, teste do adapter e dois turnos Codex reais somente leitura com o mesmo vínculo interno de sessão em 2026-10-18.
-- [ ] F2-08 Implementar isolamento de diretórios e worktrees. Diretórios distintos e trava por manager implementados; worktrees automáticos e coordenação entre processos pendentes.
+- [x] F2-08 Implementar isolamento de diretórios e worktrees. O manager confina diretórios às raízes autorizadas e usa travas locais por execução e workspace entre processos; o ciclo adversarial cria worktrees automaticamente. Evidência: testes de dois managers e de um segundo processo em `tests/integration/test_execution.py`.
 - [x] F2-09 Testar troca de resultados entre duas execuções Codex. Evidência: cenário ACP com executável falso e troca real de plano para implementação no run `5df4cc7c-48cd-4d4b-90c5-5e5db4a0e0d3`.
 
-**Estado:** execução, troca via ACP e retomada de sessão verificadas com Codex real somente leitura. Worktrees automáticos na Execution Layer e isolamento entre processos continuam pendentes.
+**Estado:** execução, troca via ACP e retomada de sessão verificadas com Codex real somente leitura. O manager coordena execuções em um sistema de arquivos local; criação de worktrees pertence à metodologia adversarial. Isolamento de segurança em nível de sistema operacional e coordenação de workflows inteiros entre processos não são fornecidos.
 
 ## Fase 3: workflows
 
