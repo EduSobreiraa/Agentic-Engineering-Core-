@@ -71,9 +71,9 @@ Cada item tem um identificador estável para vincular issues, commits e evidênc
 - [x] F4-08 Integrar testes determinísticos. Evidência: `CommandGate` e cenário `unittest`.
 - [x] F4-09 Bloquear conclusão quando houver falhas críticas. Evidência: testes de limite e gate reprovado.
 - [x] F4-10 Exigir aprovação humana antes do merge. Evidência: `WAITING_APPROVAL` e teste de autorização.
-- [x] F4-11 Executar experimento completo em repositório de teste. Evidência: `tests/scenarios/test_adversarial_loop.py`, apenas agentes simulados.
+- [x] F4-11 Executar experimento completo em repositório de teste. Evidência: cenário simulado em `tests/scenarios/test_adversarial_loop.py` e [execução com quatro turnos Codex reais](engineering/REAL_CODEX_EXPERIMENT.md), encerrada em `WAITING_APPROVAL`.
 
-**Conclusão do MVP simulado:** Implementador, QA, correção, validação e aprovação funcionam sem cópia manual de mensagens. A execução real com dois Codex, isolamento de sistema operacional e recuperação de commits após falha de persistência continuam pendentes.
+**Estado:** Implementador, QA, correção e validação funcionaram em uma execução real com Codex; o pedido de aprovação permaneceu pendente, sem decisão humana. Isolamento de sistema operacional e recuperação de commits após falha de persistência continuam pendentes.
 
 ## Fase 5: documentação
 

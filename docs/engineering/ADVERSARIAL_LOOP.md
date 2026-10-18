@@ -6,4 +6,4 @@ O fluxo é `PREPARED → IMPLEMENTED → REVIEWED → GATED`. Uma revisão aprov
 
 `run()` pode ser chamado novamente. Workflows e mensagens têm IDs determinísticos. Se o commit do Implementador divergir do último commit persistido, a execução bloqueia em vez de repetir uma operação incerta. Uma instalação deve usar um único manager ativo por banco.
 
-O MVP foi verificado com agentes simulados. A execução com dois Codex reais continua sem validação nesta fase e exige autorização explícita para consumir a franquia.
+O MVP foi verificado com agentes simulados e em [uma execução real com Codex](REAL_CODEX_EXPERIMENT.md), encerrada em `WAITING_APPROVAL`. Essa amostra não cobre aprovação humana, concorrência ou recuperação após falha de persistência. Novas execuções reais exigem autorização explícita para consumir a franquia.
