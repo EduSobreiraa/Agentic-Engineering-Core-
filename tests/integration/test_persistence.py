@@ -5,8 +5,30 @@ import pytest
 
 from aec.communication.broker import Broker
 from aec.communication.errors import ConflictError
+from aec.persistence.database import Database
+from aec.persistence.migrations import MIGRATIONS
 from aec.security.identities import Role
 from tests.conftest import make_message
+
+
+def test_phase_five_database_upgrades_without_losing_document_tables(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "phase-five.sqlite"
+    with sqlite3.connect(path) as connection:
+        for index, migration in enumerate(MIGRATIONS[:6], start=1):
+            connection.executescript(migration)
+            connection.execute(f"PRAGMA user_version = {index}")
+    db = Database(path)
+    with db.connect() as connection:
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 7
+        names = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )
+        }
+    assert {"documentation_records", "adr_records", "methodology_proposals"} <= names
 
 
 def test_atomic_publish_history_and_receipt(setup_broker) -> None:  # type: ignore[no-untyped-def]

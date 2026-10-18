@@ -122,6 +122,50 @@ MIGRATIONS = (
     );
     """,
     """
+    CREATE TABLE documentation_records (
+        document_id TEXT PRIMARY KEY,
+        request_message_id TEXT NOT NULL UNIQUE REFERENCES messages(message_id),
+        run_id TEXT NOT NULL,
+        task_id TEXT NOT NULL,
+        document_type TEXT NOT NULL,
+        content TEXT NOT NULL,
+        sha256 TEXT NOT NULL,
+        artifact_ref TEXT NOT NULL,
+        source_refs TEXT NOT NULL,
+        validation_status TEXT NOT NULL,
+        warnings TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    );
+    """,
+    """
+    CREATE TABLE adr_records (
+        adr_id TEXT NOT NULL,
+        revision INTEGER NOT NULL CHECK(revision >= 1),
+        run_id TEXT NOT NULL REFERENCES engineering_runs(run_id),
+        task_id TEXT NOT NULL,
+        status TEXT NOT NULL CHECK(status IN
+            ('PROPOSED','ACCEPTED','REJECTED','SUPERSEDED')),
+        content TEXT NOT NULL,
+        sha256 TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY(adr_id, revision),
+        UNIQUE(adr_id, run_id, sha256)
+    );
+    CREATE INDEX adr_records_run ON adr_records(run_id, adr_id, revision);
+    CREATE TRIGGER documentation_records_no_update
+    BEFORE UPDATE ON documentation_records
+    BEGIN SELECT RAISE(ABORT, 'historical document is immutable'); END;
+    CREATE TRIGGER documentation_records_no_delete
+    BEFORE DELETE ON documentation_records
+    BEGIN SELECT RAISE(ABORT, 'historical document is immutable'); END;
+    CREATE TRIGGER adr_records_no_update
+    BEFORE UPDATE ON adr_records
+    BEGIN SELECT RAISE(ABORT, 'ADR revision is immutable'); END;
+    CREATE TRIGGER adr_records_no_delete
+    BEFORE DELETE ON adr_records
+    BEGIN SELECT RAISE(ABORT, 'ADR revision is immutable'); END;
+    """,
+    """
     CREATE TABLE methodology_versions (
         methodology_id TEXT NOT NULL, version TEXT NOT NULL,
         definition TEXT NOT NULL, sha256 TEXT NOT NULL,
@@ -145,6 +189,26 @@ MIGRATIONS = (
         run_id TEXT PRIMARY KEY, methodology_id TEXT NOT NULL,
         version TEXT NOT NULL, sha256 TEXT NOT NULL
     );
+    CREATE TABLE methodology_documents (
+        document_id TEXT PRIMARY KEY,
+        proposal_id TEXT NOT NULL REFERENCES methodology_proposals(proposal_id),
+        document_type TEXT NOT NULL,
+        content TEXT NOT NULL, sha256 TEXT NOT NULL,
+        artifact_ref TEXT NOT NULL, created_at TEXT NOT NULL,
+        UNIQUE(proposal_id, document_type)
+    );
+    CREATE TRIGGER methodology_documents_no_update
+    BEFORE UPDATE ON methodology_documents
+    BEGIN SELECT RAISE(ABORT, 'historical document is immutable'); END;
+    CREATE TRIGGER methodology_documents_no_delete
+    BEFORE DELETE ON methodology_documents
+    BEGIN SELECT RAISE(ABORT, 'historical document is immutable'); END;
+    CREATE TRIGGER methodology_versions_no_update
+    BEFORE UPDATE ON methodology_versions
+    BEGIN SELECT RAISE(ABORT, 'published methodology is immutable'); END;
+    CREATE TRIGGER methodology_versions_no_delete
+    BEFORE DELETE ON methodology_versions
+    BEGIN SELECT RAISE(ABORT, 'published methodology is immutable'); END;
     """,
 )
 

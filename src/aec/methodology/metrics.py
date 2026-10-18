@@ -134,7 +134,7 @@ def calculate(
             None,
             "fraction",
             "documentation",
-            "No required-document manifest exists in Phase 5.",
+            "No required-document manifest exists for methodologies.",
         ),
         metric(
             "agent_invocation_count",

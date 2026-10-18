@@ -9,3 +9,5 @@ Os modelos Pydantic em `src/aec/methodology/contracts.py` usam `strict=True`, re
 O ciclo persistido aceita `DRAFT`, `SUBMITTED`, `UNDER_EVALUATION`, `EVALUATION_FAILED`, `AWAITING_APPROVAL`, `REJECTED`, `CHANGES_REQUESTED`, `APPROVED` e `PUBLISHED`. `SUPERSEDED` está reservado no contrato e ainda não possui transição pública. Uma proposta submetida não pode mudar de conteúdo. Uma revisão exige um novo ID de proposta.
 
 O ACP usa o tipo existente `METHODOLOGY_PROPOSAL`. A mensagem leva o ID e o hash para correlação; o objeto completo permanece no SQLite. O broker valida o papel do remetente. Ele não aceita aprovações metodológicas.
+
+O Documentation Worker da Fase 5 oferece `create_methodology_document(proposal_id, kind)`, em que `kind` é `rfc`, `evaluation`, `decision` ou `publication`. Ele lê apenas registros metodológicos persistidos e devolve o ID de um Markdown imutável, recuperável por `get_document()`. Os documentos metodológicos usam a mesma área de artefatos e o mesmo banco da Fase 5; pedidos ACP de relatórios de execução continuam com seu contrato original.

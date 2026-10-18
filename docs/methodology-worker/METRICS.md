@@ -11,7 +11,7 @@
 | `workflow_completion_rate` | Execuções em `APPROVED` | Execuções iniciadas | fração | `engineering_runs`; aprovação é o fim bem-sucedido |
 | `human_intervention_rate` | Decisões humanas registradas | Execuções iniciadas | decisões por tarefa | `workflow_approvals`; apenas decisões locais |
 | `time_to_approval` | Soma dos segundos entre início e aprovação | Execuções aprovadas | segundos por tarefa | `engineering_runs.created_at` e `workflow_approvals.decided_at` |
-| `documentation_completeness` | Indisponível | Indisponível | fração | A Fase 5 ainda não definiu um manifesto obrigatório |
+| `documentation_completeness` | Indisponível | Indisponível | fração | Não há manifesto de documentos obrigatórios por metodologia |
 | `agent_invocation_count` | Execuções de agentes persistidas | Execuções iniciadas | invocações por tarefa | `executions` |
 | `defect_recurrence_rate` | Findings cuja categoria já apareceu na janela | Findings classificados | fração | Revisões tipadas; a classificação pode variar entre projetos |
 

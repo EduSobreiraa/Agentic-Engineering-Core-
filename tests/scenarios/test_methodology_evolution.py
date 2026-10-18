@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 from datetime import datetime, timezone
 
 import pytest
@@ -181,6 +182,7 @@ def test_supervised_evolution(tmp_path: object) -> None:
     assert finding.evidence_refs == ("run-021", "run-025")
     broker = Broker(directory / "aec.sqlite")
     method_identity = broker.register("method", Role.METHODOLOGY)
+    documentation_identity = broker.register("documentation", Role.DOCUMENTATION)
     orchestrator = broker.register("orchestrator", Role.ORCHESTRATOR)
     implementer = broker.register("implementer", Role.IMPLEMENTER)
     broker.publish(
@@ -214,10 +216,12 @@ def test_supervised_evolution(tmp_path: object) -> None:
     assert {item.name: item.value for item in metrics}[
         "documentation_completeness"
     ] is None
-    documentation = DocumentationWorker(directory / "docs")
-    assert "run-021" in documentation.rfc(proposal).read_text()
-    with pytest.raises(FileExistsError):
-        documentation.rfc(proposal)
+    documentation = DocumentationWorker(broker, documentation_identity)
+    rfc_id = documentation.create_methodology_document(proposal.proposal_id, "rfc")
+    assert "run-021" in documentation.get_document(rfc_id)
+    assert (
+        documentation.create_methodology_document(proposal.proposal_id, "rfc") == rfc_id
+    )
     governance = MethodologyGovernance(
         store, registry, local_approvers=frozenset({"human-test"})
     )
@@ -262,18 +266,34 @@ def test_supervised_evolution(tmp_path: object) -> None:
     assert evaluation.verdict == "PASS"
     assert (evaluation.baseline, evaluation.candidate) == (2.5, 1.5)
     assert [pair.task_id for pair in evaluation.pairs] == ["fixture-a", "fixture-b"]
-    assert "PASS" in documentation.evaluation(evaluation).read_text()
+    evaluation_id = documentation.create_methodology_document(
+        proposal.proposal_id, "evaluation"
+    )
+    assert "PASS" in documentation.get_document(evaluation_id)
     with pytest.raises(PermissionError):
         governance.decide(proposal.proposal_id, "methodology-worker", "APPROVED")
     approval = governance.decide(proposal.proposal_id, "human-test", "APPROVED")
     assert approval.actor == "human-test"
-    assert "human-test" in documentation.decision(approval).read_text()
+    decision_id = documentation.create_methodology_document(
+        proposal.proposal_id, "decision"
+    )
+    assert "human-test" in documentation.get_document(decision_id)
     publication = governance.publish(proposal.proposal_id, "human-test")
-    assert publication.sha256 in documentation.publication(publication).read_text()
+    publication_id = documentation.create_methodology_document(
+        proposal.proposal_id, "publication"
+    )
+    assert publication.sha256 in documentation.get_document(publication_id)
     assert governance.publish(proposal.proposal_id, "human-test") == publication
     assert registry.active("dev-adversarial").version == "1.1.0"
     assert registry.get("dev-adversarial", "1.0.0").version == "1.0.0"
     assert registry.versions("dev-adversarial") == ["1.0.0", "1.1.0"]
+    with pytest.raises(sqlite3.IntegrityError, match="immutable"):
+        with db.connect() as connection:
+            connection.execute(
+                "UPDATE methodology_versions SET sha256=? "
+                "WHERE methodology_id=? AND version=?",
+                ("0" * 64, "dev-adversarial", "1.0.0"),
+            )
     workflow_repository.create(
         "new-workflow", registry.active("dev-adversarial").definition
     )

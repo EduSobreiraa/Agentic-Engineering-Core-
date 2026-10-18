@@ -122,12 +122,22 @@ Estas decisões foram aceitas no escopo inicial. Mudanças futuras devem acresce
 
 **Efeito:** outros workflows não precisam seguir essa metodologia. Worktrees não são isolamento de segurança em nível de sistema operacional. Resultado externo incerto bloqueia retomada automática; não há merge ou push automático. A integração real com dois Codex e recuperação de commits capturados imediatamente antes de falha SQLite exigem verificação posterior.
 
-## ADR-013: Propostas imutáveis e publicação transacional
+## ADR-013: Documentos históricos derivados de evidências tipadas
 
-**Estado:** aceito em 2026-10-18 para a implementação inicial da Fase 6.
+**Estado:** proposto na branch da Fase 5 em 2026-10-18; a revisão humana da mudança ainda está pendente.
 
-**Contexto:** a Fase 5 ainda não fornece o Documentation Worker completo. O ciclo adversarial fixa `1.0.0` em código. O ACP já possui um tipo de proposta, mas sua mensagem não comprova aprovação.
+**Contexto:** o ciclo adversarial já persiste implementações, revisões, gates e aprovações, mas não produz um registro documental recuperável. Declarações de agentes não comprovam testes nem decisões humanas.
 
-**Decisão:** a Fase 6 grava propostas, avaliações, decisões, versões e vínculos no SQLite existente. O hash da proposta fixa o conteúdo avaliado e aprovado. O worker recebe somente interfaces de observação e proposta. Uma ação local de `MethodologyGovernance`, com ator presente em `local_approvers`, registra a aprovação. Uma transação publica a versão e altera a referência ativa. O único operador declarativo inicial adiciona `type_check` antes de QA. O Workflow Engine pode selecionar uma definição publicada por `create_published()`.
+**Decisão proposta:** o Worker de Documentação recebe pedidos ACP autorizados, coleta os registros existentes no SQLite e gera relatórios Markdown determinísticos. O mesmo banco guarda IDs, hashes e referências dos documentos históricos. `adr_records` guarda revisões de ADR vinculadas à execução. IDs de pedidos tornam o processamento idempotente. O worker não edita registros históricos, aprovações, políticas ou metodologias. ADRs aceitos exigem uma aprovação humana local vinculada ao próprio ADR.
 
-**Efeito:** a publicação rejeita versão-base obsoleta, dependência ausente e aprovação inválida. Repetir a mesma publicação não cria outra versão. O mecanismo de identidade conserva o limite local da Fase 3. A adoção pelo `AdversarialLoop` e um benchmark executado pelo AEC continuam pendentes. O renderizador documental mínimo não encerra a Fase 5.
+**Efeito:** o ACP ganha mensagens documentais tipadas e rotas por papel. O Workflow Engine pode solicitar um relatório por um validador registrado, sem criar um executor paralelo. A integridade do arquivo pode ser comparada ao SHA-256 persistido. O limite de um writer por banco e a ausência de autenticação humana entre máquinas continuam válidos.
+
+## ADR-014: Propostas imutáveis e publicação metodológica transacional
+
+**Estado:** implementado na branch da Fase 6 em 2026-10-18; publicação desta mudança sujeita à revisão humana.
+
+**Contexto:** o ACP transporta propostas, mas não autentica aprovações humanas. A Fase 5 já oferece um Worker de Documentação com artefatos imutáveis.
+
+**Decisão:** propostas, avaliações, decisões, versões e vínculos são gravados no SQLite existente pela migração posterior às migrações da Fase 5. O hash da proposta fixa o conteúdo avaliado e aprovado. O worker apenas observa e propõe; `MethodologyGovernance` exige um ator autorizado em `local_approvers` e publica em uma transação. O único operador declarativo inicial adiciona `type_check` antes de QA. O Workflow Engine pode selecionar uma definição publicada por `create_published()`. O Worker de Documentação existente renderiza RFC, avaliação, decisão e publicação a partir dos registros persistidos, com hashes e histórico imutável.
+
+**Efeito:** publicação rejeita versão-base obsoleta, dependência ausente e aprovação inválida. Repetir a mesma publicação não cria outra versão. A autenticação humana permanece local, conforme ADR-011. A adoção pelo `AdversarialLoop` e benchmarks executados pelo AEC continuam pendentes.
