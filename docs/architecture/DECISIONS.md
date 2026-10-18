@@ -71,3 +71,13 @@ Estas decisões foram aceitas no escopo inicial. Mudanças futuras devem acresce
 **Decisão:** o broker emite handles locais, confere remetente e rota por papel e grava mensagens, entregas, recibos e eventos em SQLite. `BEGIN IMMEDIATE` serializa reivindicações. Cada claim recebe um token distinto; ACK exige o token vigente. `message_id` é único e republicações conflitantes são rejeitadas. A versão do esquema usa `PRAGMA user_version`.
 
 **Efeito:** a entrega é *at-least-once*. Recibos únicos evitam duplicação no estado do broker, mas efeitos externos exigirão reconciliação. Handles não protegem contra processos locais maliciosos. Leitura de histórico é reservada ao código local confiável. O ACP não decide transições de workflow.
+
+## ADR-008: Execução externa vinculada a uma atribuição ACP
+
+**Estado:** aceito em 2026-10-17.
+
+**Contexto:** um ACK do ACP não garante que um processo externo executou uma única vez. O Codex pode modificar arquivos antes de uma interrupção.
+
+**Decisão:** o manager exige identidade local válida e uma atribuição ACP persistida, vincula cada mensagem de origem a no máximo uma execução, grava estados e nunca reinicia automaticamente turnos interrompidos. `workspace-write` exige concessão ao agente no manager e `metadata.workspace_write=true` na atribuição do orquestrador. Somente o manager publica resultados com identidade autorizada. Sessões internas AEC e IDs do Codex ficam separados. O isolamento de escrita por diretório vale dentro de um único manager.
+
+**Efeito:** o SQLite conserva resultado e histórico para inspeção. A implantação deve usar um manager ativo por banco; coordenação entre processos requer projeto posterior. Código gerado não aprova seu próprio quality gate.

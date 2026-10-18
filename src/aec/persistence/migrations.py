@@ -48,6 +48,32 @@ MIGRATIONS = (
         created_at TEXT NOT NULL
     );
     """,
+    """
+    CREATE TABLE executions (
+        execution_id TEXT PRIMARY KEY,
+        run_id TEXT NOT NULL,
+        task_id TEXT NOT NULL,
+        agent_id TEXT NOT NULL,
+        executor TEXT NOT NULL,
+        working_directory TEXT NOT NULL,
+        source_message_id TEXT NOT NULL UNIQUE,
+        request_hash TEXT NOT NULL,
+        status TEXT NOT NULL,
+        result TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    );
+    CREATE TABLE agent_sessions (
+        session_id TEXT PRIMARY KEY,
+        provider_session_id TEXT NOT NULL,
+        executor TEXT NOT NULL,
+        agent_id TEXT NOT NULL,
+        working_directory TEXT NOT NULL,
+        state TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        last_used_at TEXT NOT NULL
+    );
+    """,
 )
 
 

@@ -33,17 +33,17 @@ Cada item tem um identificador estável para vincular issues, commits e evidênc
 
 ## Fase 2: execução
 
-- [ ] F2-01 Definir interface abstrata dos executores.
-- [ ] F2-02 Implementar adapter Codex CLI.
-- [ ] F2-03 Verificar autenticação pela assinatura existente.
-- [ ] F2-04 Executar tarefas não interativas.
-- [ ] F2-05 Capturar respostas e resultados estruturados.
-- [ ] F2-06 Implementar timeouts e tratamento de falhas.
-- [ ] F2-07 Investigar persistência e retomada de sessões Codex.
-- [ ] F2-08 Implementar isolamento de diretórios e worktrees.
-- [ ] F2-09 Testar troca de resultados entre duas execuções Codex.
+- [x] F2-01 Definir interface abstrata dos executores. Evidência: `execution/base.py`.
+- [x] F2-02 Implementar adapter Codex CLI. Evidência: `execution/adapters/codex_cli.py` e testes com executável falso.
+- [x] F2-03 Verificar autenticação pela assinatura existente. Evidência: `codex login status` informou login pelo ChatGPT em 2026-10-17.
+- [x] F2-04 Executar tarefas não interativas. Evidência: `exec --json` confirmado na CLI 0.163.0 e executado com falso Codex; turno real pendente.
+- [x] F2-05 Capturar respostas e resultados estruturados. Evidência: testes do parser JSONL; evento real pendente.
+- [x] F2-06 Implementar timeouts e tratamento de falhas. Evidência: testes de timeout e estados.
+- [x] F2-07 Investigar persistência e retomada de sessões Codex. Evidência: `exec resume --help`, tabela `agent_sessions`; retomada real pendente.
+- [ ] F2-08 Implementar isolamento de diretórios e worktrees. Diretórios distintos e trava por manager implementados; worktrees automáticos e coordenação entre processos pendentes.
+- [x] F2-09 Testar troca de resultados entre duas execuções Codex. Evidência: cenário ACP com executável falso; cenário real opt-in pendente.
 
-**Conclusão:** o orquestrador inicia e acompanha execuções Codex independentes sem API paga.
+**Estado:** infraestrutura implementada e verificada com Codex falso. A conclusão da fase depende de um turno real opt-in e da validação de retomada e isolamento no ambiente real.
 
 ## Fase 3: workflows
 
