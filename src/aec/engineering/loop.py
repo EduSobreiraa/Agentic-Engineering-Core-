@@ -5,6 +5,7 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 from uuid import uuid4
 
 from aec.communication.broker import Broker
@@ -225,19 +226,39 @@ class AdversarialLoop:
         execution = self.manager.repository.get(str(step.execution_id))
         if not isinstance(execution, ExecutionResult):
             raise RuntimeError("execution result missing")
-        artifact_directory = (
-            Path(self.broker.db.path).resolve().parent
-            / "artifacts"
-            / hashlib.sha256(workflow_id.encode()).hexdigest()
-        )
         for ref in execution.artifact_refs:
-            artifact = artifact_directory / ref.artifact_id
-            if (
-                not artifact.is_file()
-                or hashlib.sha256(artifact.read_bytes()).hexdigest() != ref.sha256
-            ):
+            if not self._artifact_intact(ref):
                 raise RuntimeError("execution artifact integrity failed")
         return str(step.result["output"]), execution.artifact_refs
+
+    def _artifact_intact(self, ref: ArtifactRef) -> bool:
+        source_run = urlsplit(ref.uri).netloc
+        if ref.uri != f"artifact://{source_run}/{ref.artifact_id}":
+            return False
+        artifact = (
+            Path(self.broker.db.path).resolve().parent
+            / "artifacts"
+            / hashlib.sha256(source_run.encode()).hexdigest()
+            / ref.artifact_id
+        )
+        return (
+            artifact.is_file()
+            and hashlib.sha256(artifact.read_bytes()).hexdigest() == ref.sha256
+        )
+
+    def _qa_evidence_valid(
+        self, run_id: str, number: int, review: QAReviewResult
+    ) -> bool:
+        known = [
+            ref
+            for stage in ("implement", "review")
+            for message in self.broker.get_history(f"{run_id}-i{number}-{stage}")
+            for ref in message.artifact_refs
+        ]
+        supplied = review.evidence_refs + [
+            ref for finding in review.findings for ref in finding.evidence_refs
+        ]
+        return all(ref in known and self._artifact_intact(ref) for ref in supplied)
 
     def _save(
         self,
@@ -436,6 +457,8 @@ class AdversarialLoop:
                         implementation.result_commit,
                     )
                     review = QAReviewResult.model_validate_json(output)
+                    if not self._qa_evidence_valid(run_id, number, review):
+                        raise ValueError("QA supplied nonexistent or altered evidence")
                     if (
                         review.task_id != row["task_id"]
                         or review.iteration != number

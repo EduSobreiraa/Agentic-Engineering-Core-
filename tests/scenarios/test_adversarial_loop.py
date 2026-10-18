@@ -26,10 +26,12 @@ class SimulatedAgents(ExecutionAdapter):
         never_fix: bool = False,
         qa_modify: bool = False,
         high_hypothesis: bool = False,
+        fake_evidence: bool = False,
     ) -> None:
         self.never_fix = never_fix
         self.qa_modify = qa_modify
         self.high_hypothesis = high_hypothesis
+        self.fake_evidence = fake_evidence
         self.implementations = 0
 
     async def healthcheck(self) -> bool:
@@ -73,6 +75,17 @@ class SimulatedAgents(ExecutionAdapter):
                 "actual_behavior": "implicit operator error",
                 "status": "REPRODUCED",
             }
+            if self.fake_evidence:
+                finding["reproduction_steps"] = []
+                finding["evidence_refs"] = [
+                    {
+                        "artifact_id": "missing",
+                        "kind": "text",
+                        "uri": f"artifact://{request.run_id}/missing",
+                        "sha256": "0" * 64,
+                        "created_by": "qa",
+                    }
+                ]
             output = json.dumps(
                 {
                     "task_id": "divide",
@@ -106,6 +119,7 @@ def setup(
     qa_modify: bool = False,
     gate_fail: bool = False,
     high_hypothesis: bool = False,
+    fake_evidence: bool = False,
 ) -> tuple[AdversarialLoop, SimulatedAgents]:
     repository = tmp_path / "project"
     repository.mkdir()
@@ -140,7 +154,7 @@ def setup(
     implementer = broker.register("implementer", Role.IMPLEMENTER)
     qa = broker.register("qa", Role.QA)
     quality_gate = broker.register("quality-gate", Role.QUALITY_GATE)
-    adapter = SimulatedAgents(never_fix, qa_modify, high_hypothesis)
+    adapter = SimulatedAgents(never_fix, qa_modify, high_hypothesis, fake_evidence)
     manager = ExecutionManager(
         broker,
         {"simulated": adapter},
@@ -222,6 +236,14 @@ def test_qa_snapshot_mutation_blocks(tmp_path: Path) -> None:
     run_id = loop.create("divide", "Fix zero handling", ("zero raises",), ("calc.py",))
     assert asyncio.run(loop.run(run_id)) == "BLOCKED"
     assert loop.broker.get_message(f"approval:{run_id}") is None
+
+
+def test_nonexistent_qa_evidence_blocks(tmp_path: Path) -> None:
+    loop, _ = setup(tmp_path, fake_evidence=True)
+    run_id = loop.create("divide", "Fix zero handling", ("zero raises",), ("calc.py",))
+    assert asyncio.run(loop.run(run_id)) == "BLOCKED"
+    assert loop.broker.get_message(f"approval:{run_id}") is None
+    assert "nonexistent or altered evidence" in loop.history(run_id)["run"]["error"]
 
 
 def test_gate_failure_blocks_even_after_qa_pass(tmp_path: Path) -> None:
