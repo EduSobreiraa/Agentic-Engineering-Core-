@@ -89,14 +89,14 @@ Cada item tem um identificador estável para vincular issues, commits e evidênc
 ## Fase 6: governança metodológica
 
 - [x] F6-01 Criar Worker de Metodologia. Evidência: `methodology/worker.py` e cenário simulado.
-- [x] F6-02 Implementar métricas de execução. Evidência: `methodology/metrics.py`; documentação incompleta permanece indisponível.
+- [x] F6-02 Implementar métricas de execução. Evidência: `methodology/metrics.py`; completude documental é calculada quando a versão declara `required_documents`, com verificação do artefato.
 - [x] F6-03 Produzir propostas metodológicas em RFCs. Evidência: `DocumentationWorker.create_methodology_document()`, registro imutável e cenário simulado.
 - [x] F6-04 Definir avaliação comparativa de metodologias. Evidência: pares tipados e cenário com fixtures; execução automática de benchmarks pendente.
 - [x] F6-05 Implementar aprovação humana. Evidência: `MethodologyGovernance.decide()` e testes de rejeição.
 - [x] F6-06 Publicar novas versões somente após aprovação. Evidência: publicação transacional e `WorkflowEngine.create_published()`; seleção pelo controlador especializado da Fase 4 pendente.
 - [x] F6-07 Preservar histórico das decisões. Evidência: `methodology_events`, hashes, versões e vínculos de execução.
 
-**Estado:** o ciclo supervisionado funciona com fixtures e workflows declarativos, integrado ao Documentation Worker da Fase 5. A Fase 6 ainda não conclui a integração com o `AdversarialLoop` nem executa benchmarks controlados por conta própria. Falta um manifesto para calcular completude documental.
+**Estado:** o ciclo supervisionado funciona com fixtures e workflows declarativos, integrado ao Documentation Worker da Fase 5. A Fase 6 ainda não conclui a integração com o `AdversarialLoop` nem executa benchmarks controlados por conta própria. Versões sem manifesto documental deixam essa métrica indisponível.
 
 ## Fase 7: expansão metodológica
 

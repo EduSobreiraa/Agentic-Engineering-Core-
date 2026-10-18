@@ -151,3 +151,13 @@ Estas decisões foram aceitas no escopo inicial. Mudanças futuras devem acresce
 **Decisão:** a retomada aceita somente um commit filho direto do head registrado, com mensagem e autoria do controller, worktree limpa, arquivos confinados aos caminhos permitidos, workflow e execução concluídos e artefatos íntegros. Ela reconstrói a linha da iteração e o head sem executar o agente novamente. Qualquer divergência permanece bloqueada.
 
 **Efeito:** uma falha entre captura e persistência é recuperável. Resultados externos incertos e commits não atribuíveis ao controller continuam exigindo inspeção humana.
+
+## ADR-016: Manifesto documental por versão metodológica
+
+**Estado:** implementado em 2026-10-18.
+
+**Contexto:** a Fase 5 produz três tipos de relatório, mas a métrica de completude não podia inferir quais eram obrigatórios para uma metodologia.
+
+**Decisão:** `MethodologyVersion.required_documents` declara um subconjunto dos tipos documentais existentes. A observação conta apenas registros válidos com conteúdo e artefato íntegros vinculados à execução. Uma versão sem manifesto mantém a métrica indisponível, sem transformar ausência de requisito em zero.
+
+**Efeito:** versões antigas continuam legíveis. Versões com manifesto produzem numerador e denominador determinísticos; o manifesto é herdado por uma versão candidata.

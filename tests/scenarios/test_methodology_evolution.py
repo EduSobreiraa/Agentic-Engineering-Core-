@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import sqlite3
 from datetime import datetime, timezone
 
@@ -7,7 +8,7 @@ import pytest
 from pydantic import ValidationError
 
 from aec.communication.broker import Broker
-from aec.communication.schemas import Message, MessageType, TaskAssigned
+from aec.communication.schemas import ArtifactRef, Message, MessageType, TaskAssigned
 from aec.documentation.worker import DocumentationWorker
 from aec.methodology.contracts import BenchmarkCase, MethodologyVersion
 from aec.methodology.governance import (
@@ -314,6 +315,81 @@ def test_supervised_evolution(tmp_path: object) -> None:
         "APPROVED",
         "PUBLISHED",
     ]
+
+
+def test_documentation_manifest_checks_persisted_artifact(tmp_path: object) -> None:
+    from pathlib import Path
+
+    directory = Path(str(tmp_path))
+    db = Database(directory / "aec.sqlite")
+    version = base_version().model_copy(
+        update={"required_documents": frozenset({"execution-report"})}
+    )
+    MethodologyRegistry(db).seed(version, actor="bootstrap")
+    history(db, "run-021")
+    broker = Broker(directory / "aec.sqlite")
+    orchestrator = broker.register("orchestrator", Role.ORCHESTRATOR)
+    implementer = broker.register("implementer", Role.IMPLEMENTER)
+    broker.publish(
+        Message(
+            protocol="ACP",
+            version="0.1",
+            message_id="documentation-source",
+            run_id="run-021",
+            task_id="run-021",
+            sender=orchestrator.agent_id,
+            recipient=implementer.agent_id,
+            type=MessageType.TASK_ASSIGNED,
+            iteration=0,
+            created_at=datetime.now(timezone.utc),
+            payload=TaskAssigned(title="Fixture", instructions="Implement"),
+        ),
+        orchestrator,
+    )
+    metrics = calculate(ObservationCollector(db).collect(), "dev-adversarial", "1.0.0")
+    assert {item.name: item.value for item in metrics}[
+        "documentation_completeness"
+    ] == 0
+    content = "# Report\n"
+    artifact_id = "report.md"
+    artifact_dir = directory / "artifacts" / hashlib.sha256(b"run-021").hexdigest()
+    artifact_dir.mkdir(parents=True)
+    artifact = artifact_dir / artifact_id
+    artifact.write_text(content)
+    ref = ArtifactRef(
+        artifact_id=artifact_id,
+        kind="documentation/markdown",
+        uri=f"artifact://run-021/{artifact_id}",
+        sha256=hashlib.sha256(content.encode()).hexdigest(),
+        created_by="documentation",
+    )
+    with db.connect() as connection:
+        connection.execute(
+            "INSERT INTO documentation_records VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                "doc-021",
+                "documentation-source",
+                "run-021",
+                "run-021",
+                "execution-report",
+                content,
+                ref.sha256,
+                ref.model_dump_json(),
+                "[]",
+                "VALID",
+                "[]",
+                datetime.now(timezone.utc).isoformat(),
+            ),
+        )
+    metrics = calculate(ObservationCollector(db).collect(), "dev-adversarial", "1.0.0")
+    assert {item.name: item.value for item in metrics}[
+        "documentation_completeness"
+    ] == 1
+    artifact.write_text("tampered")
+    metrics = calculate(ObservationCollector(db).collect(), "dev-adversarial", "1.0.0")
+    assert {item.name: item.value for item in metrics}[
+        "documentation_completeness"
+    ] == 0
 
 
 def test_inconclusive_and_duplicate(tmp_path: object) -> None:

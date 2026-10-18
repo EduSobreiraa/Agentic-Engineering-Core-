@@ -48,6 +48,9 @@ class MethodologyVersion(Contract):
     version: str
     definition: WorkflowDefinition
     mandatory_gates: frozenset[str]
+    required_documents: frozenset[
+        Literal["execution-report", "qa-summary", "change-summary"]
+    ] = frozenset()
 
     @model_validator(mode="after")
     def valid_version(self) -> MethodologyVersion:
@@ -86,6 +89,20 @@ class MethodologyObservation(Contract):
     human_interventions: Annotated[int, Field(ge=0)] | None
     agent_invocations: Annotated[int, Field(ge=0)] | None
     approval_at: datetime | None
+    required_documents: Annotated[int, Field(ge=0)] | None = None
+    valid_documents: Annotated[int, Field(ge=0)] | None = None
+
+    @model_validator(mode="after")
+    def valid_document_count(self) -> MethodologyObservation:
+        if (self.required_documents is None) != (self.valid_documents is None):
+            raise ValueError("documentation counts must be available together")
+        if (
+            self.required_documents is not None
+            and self.valid_documents is not None
+            and self.valid_documents > self.required_documents
+        ):
+            raise ValueError("valid documents exceed required documents")
+        return self
 
 
 class MethodologyMetric(Contract):

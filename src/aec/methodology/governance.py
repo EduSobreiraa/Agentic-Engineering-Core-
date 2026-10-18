@@ -284,6 +284,7 @@ def candidate(
         version=proposal.proposed_version,
         definition=definition,
         mandatory_gates=base.mandatory_gates,
+        required_documents=base.required_documents,
     )
 
 

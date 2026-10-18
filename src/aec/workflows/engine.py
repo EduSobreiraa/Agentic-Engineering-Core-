@@ -6,7 +6,7 @@ import asyncio
 import re
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
 from uuid import uuid4
 
 from aec.communication.broker import Broker
@@ -20,8 +20,10 @@ from aec.communication.schemas import (
 )
 from aec.execution.manager import ExecutionManager
 from aec.execution.models import ExecutionRequest, ExecutionResult, ExecutionStatus
-from aec.methodology.governance import MethodologyRegistry
 from aec.security.identities import Identity, Role
+
+if TYPE_CHECKING:
+    from aec.methodology.governance import MethodologyRegistry
 
 from .loader import validate
 from .models import (

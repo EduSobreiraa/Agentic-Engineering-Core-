@@ -81,6 +81,28 @@ def test_window_and_recurrence() -> None:
         calculate(runs, "dev-adversarial", "1.0.0", start=MOMENT, end=MOMENT)
 
 
+def test_documentation_completeness_uses_declared_denominator() -> None:
+    runs = [
+        observation("documented").model_copy(
+            update={"required_documents": 3, "valid_documents": 2}
+        ),
+        observation("missing").model_copy(
+            update={"required_documents": 1, "valid_documents": 0}
+        ),
+        observation("unknown"),
+    ]
+    values = {
+        item.name: item
+        for item in calculate(runs, "dev-adversarial", "1.0.0")
+    }
+    completeness = values["documentation_completeness"]
+    assert (completeness.numerator, completeness.denominator, completeness.value) == (
+        2,
+        4,
+        0.5,
+    )
+
+
 def test_proposal_rejects_arbitrary_operation_and_version() -> None:
     valid = dict(
         proposal_id="RFC-1",

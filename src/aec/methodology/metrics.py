@@ -67,6 +67,11 @@ def calculate(
             recurring += category in seen
             seen.add(category)
     findings = sum(len(o.findings) for o in classified)
+    documented = [
+        o
+        for o in runs
+        if o.required_documents is not None and o.valid_documents is not None
+    ]
     return [
         metric(
             "first_pass_approval_rate",
@@ -130,11 +135,11 @@ def calculate(
         ),
         metric(
             "documentation_completeness",
-            None,
-            None,
+            sum(o.valid_documents or 0 for o in documented),
+            sum(o.required_documents or 0 for o in documented),
             "fraction",
-            "documentation",
-            "No required-document manifest exists for methodologies.",
+            "methodology_versions.required_documents and documentation_records",
+            "Only declared documents with valid records and intact artifacts count.",
         ),
         metric(
             "agent_invocation_count",
