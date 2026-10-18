@@ -14,7 +14,15 @@ uv run mypy
 uv run python -m aec.simulation.agents
 ```
 
-O ambiente de desenvolvimento usa ferramentas locais e não exige `OPENAI_API_KEY`. A integração planejada com Codex CLI usará a autenticação já disponível no computador, após validação na Fase 2.
+O ambiente de desenvolvimento usa ferramentas locais e não exige `OPENAI_API_KEY`. A Fase 2 integra o executável Codex CLI e usa a autenticação já disponível. O teste padrão usa um executável falso e não consome a assinatura.
+
+Para executar a demonstração real com dois agentes e persistir o histórico:
+
+```bash
+uv run python -m aec.execution.demo --database /tmp/aec-phase2.sqlite --workspace /tmp/aec-phase2-work
+```
+
+Esse comando inicia dois turnos Codex read-only e consome capacidade da assinatura. Consulte [execução](docs/execution/EXECUTION_LAYER.md), [contratos](docs/execution/EXECUTOR_CONTRACT.md) e [testes](docs/execution/TESTING.md).
 
 ## Estrutura
 
@@ -30,4 +38,4 @@ O [roadmap](docs/ROADMAP.md) registra o progresso. A [arquitetura](docs/architec
 
 ## Limites atuais
 
-O ACP v0.1 não executa agentes LLM, processos externos nem workflows. Handles locais não oferecem autenticação segura entre máquinas. O SQLite guarda mensagens e recibos; efeitos externos futuros precisam de reconciliação própria.
+O ACP v0.1 permanece independente de executores. A Execution Layer inicia processos Codex e guarda estados, mas não executa workflows nem quality gates. Handles locais não oferecem autenticação segura entre máquinas. Reinícios interrompem turnos em andamento sem os repetir automaticamente.

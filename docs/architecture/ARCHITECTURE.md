@@ -2,7 +2,7 @@
 
 ## Objetivo e estado
 
-O AEC coordenará tarefas de engenharia por meio de agentes, artefatos verificáveis e decisões humanas. Este documento descreve a arquitetura alvo. A Fase 1 implementa apenas o ACP local entre agentes simulados. Control Plane, Execution Layer e workflows continuam planejados.
+O AEC coordenará tarefas de engenharia por meio de agentes, artefatos verificáveis e decisões humanas. Este documento descreve a arquitetura alvo. A Fase 1 implementou o ACP local. A Fase 2 acrescentou um manager de execução e o adapter Codex CLI; Control Plane e workflows continuam planejados.
 
 ## Fluxo previsto
 
@@ -46,6 +46,8 @@ O primeiro fluxo completo será o ciclo Implementador, QA adversarial, correçã
 SQLite será a fonte inicial de verdade para tarefas, mensagens, estados e aprovações. Diretórios de artefatos guardarão arquivos de evidência; o banco guardará suas referências. Git versionará código e definições de metodologia. JSONL poderá servir para exportar eventos, caso haja necessidade concreta; não será uma segunda fonte de verdade.
 
 O [ACP v0.1](../protocols/ACP_SPEC.md) define gravação antes da entrega, lease, ACK, recibos únicos e recuperação. A retenção atual é indefinida. Ações externas e aprovação humana permanecem fora do broker.
+
+A [Execution Layer](../execution/EXECUTION_LAYER.md) grava turnos e sessões no mesmo SQLite. Ao reiniciar, marca turnos em andamento como `INTERRUPTED`, sem repetir efeitos externos. O manager usa um semáforo por processo e uma trava por diretório; uma instalação deve ter um único manager ativo para o banco.
 
 ## Ordem de construção
 
