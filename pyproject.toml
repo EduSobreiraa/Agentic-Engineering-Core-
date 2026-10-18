@@ -8,13 +8,14 @@ version = "0.1.0"
 description = "Núcleo de engenharia agêntica supervisionada"
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = ["pydantic>=2,<3"]
+dependencies = ["pydantic>=2,<3", "PyYAML>=6,<7"]
 
 [project.optional-dependencies]
 dev = [
     "mypy>=1.11",
     "pytest>=8",
     "ruff>=0.6",
+    "types-PyYAML>=6",
 ]
 
 [tool.setuptools.packages.find]

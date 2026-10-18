@@ -1,0 +1,33 @@
+id: sample-engineering-workflow
+version: 1.0.0
+name: Simulated engineering workflow
+limits:
+  max_parallel_steps: 2
+  max_total_steps: 4
+  max_duration_seconds: 1800
+steps:
+  - id: analyze
+    type: agent
+    agent: analyst
+    executor: simulated
+    inputs:
+      prompt: "Specification: define a pure Python function add(a: int, b: int) -> int that returns a + b. Write a short implementation plan. Do not edit files."
+  - id: implement
+    type: agent
+    agent: implementer
+    executor: simulated
+    depends_on: [analyze]
+    inputs:
+      prompt: "Implement this plan: {{analyze.output}}. Return only valid Python source with exactly one function named add(a: int, b: int) -> int whose sole statement is return a + b. No markdown, tests, prose, or imports. Do not edit files."
+  - id: validate
+    type: validation
+    validator: artifact-check
+    depends_on: [implement]
+    inputs:
+      artifact: "{{implement.output}}"
+  - id: approval
+    type: human_approval
+    depends_on: [validate]
+    condition:
+      step: validate
+      result_equals: true

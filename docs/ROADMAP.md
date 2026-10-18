@@ -36,28 +36,28 @@ Cada item tem um identificador estável para vincular issues, commits e evidênc
 - [x] F2-01 Definir interface abstrata dos executores. Evidência: `execution/base.py`.
 - [x] F2-02 Implementar adapter Codex CLI. Evidência: `execution/adapters/codex_cli.py` e testes com executável falso.
 - [x] F2-03 Verificar autenticação pela assinatura existente. Evidência: `codex login status` informou login pelo ChatGPT em 2026-10-17.
-- [x] F2-04 Executar tarefas não interativas. Evidência: `exec --json` confirmado na CLI 0.163.0 e executado com falso Codex; turno real pendente.
-- [x] F2-05 Capturar respostas e resultados estruturados. Evidência: testes do parser JSONL; evento real pendente.
+- [x] F2-04 Executar tarefas não interativas. Evidência: `exec --json` confirmado na CLI 0.163.0; dois turnos reais read-only no demo de workflow em 2026-10-18.
+- [x] F2-05 Capturar respostas e resultados estruturados. Evidência: testes do parser JSONL e resultados reais persistidos no run `5df4cc7c-48cd-4d4b-90c5-5e5db4a0e0d3`.
 - [x] F2-06 Implementar timeouts e tratamento de falhas. Evidência: testes de timeout e estados.
 - [x] F2-07 Investigar persistência e retomada de sessões Codex. Evidência: `exec resume --help`, tabela `agent_sessions`; retomada real pendente.
 - [ ] F2-08 Implementar isolamento de diretórios e worktrees. Diretórios distintos e trava por manager implementados; worktrees automáticos e coordenação entre processos pendentes.
-- [x] F2-09 Testar troca de resultados entre duas execuções Codex. Evidência: cenário ACP com executável falso; cenário real opt-in pendente.
+- [x] F2-09 Testar troca de resultados entre duas execuções Codex. Evidência: cenário ACP com executável falso e troca real de plano para implementação no run `5df4cc7c-48cd-4d4b-90c5-5e5db4a0e0d3`.
 
-**Estado:** infraestrutura implementada e verificada com Codex falso. A conclusão da fase depende de um turno real opt-in e da validação de retomada e isolamento no ambiente real.
+**Estado:** execução e troca via ACP verificadas com dois turnos Codex reais read-only. Retomada de sessão real, worktrees automáticos e isolamento entre processos continuam pendentes.
 
 ## Fase 3: workflows
 
-- [ ] F3-01 Definir contratos de workflows.
-- [ ] F3-02 Implementar carregamento de YAML.
-- [ ] F3-03 Validar versões e esquemas.
-- [ ] F3-04 Construir máquina de estados.
-- [ ] F3-05 Implementar transições condicionais.
-- [ ] F3-06 Implementar limites de iteração.
-- [ ] F3-07 Implementar retries seguros.
-- [ ] F3-08 Implementar regras de interrupção.
-- [ ] F3-09 Recuperar workflows após falhas.
+- [x] F3-01 Definir contratos de workflows. Evidência: `workflows/models.py`.
+- [x] F3-02 Implementar carregamento de YAML. Evidência: `workflows/loader.py` e `docs/workflows/example.yaml`.
+- [x] F3-03 Validar versões e esquemas. Evidência: `validate()` e testes de definições inválidas.
+- [x] F3-04 Construir máquina de estados. Evidência: `workflows/state_machine.py` e eventos persistidos.
+- [x] F3-05 Implementar transições condicionais. Evidência: condição booleana sobre resultado de validador.
+- [ ] F3-06 Implementar limites de iteração. Adiado para o contrato de loops adversariais da Fase 4; workflows da Fase 3 são acíclicos.
+- [x] F3-07 Implementar retries seguros. Evidência: tentativas limitadas de validadores registrados; agentes não são repetidos automaticamente.
+- [x] F3-08 Implementar regras de interrupção. Evidência: timeout, cancelamento e estado `INTERRUPTED` para resultado incerto.
+- [x] F3-09 Recuperar workflows após falhas. Evidência: `recover()` reconcilia resultados conhecidos e preserva aprovação pendente.
 
-**Conclusão:** workflows determinísticos executam a partir de definições versionadas.
+**Estado:** motor local de workflows acíclicos, versionados e persistentes implementado com adapter simulado e verificado com dois turnos Codex reais até `WAITING_APPROVAL`. Coordenação entre processos permanece pendente. O ciclo Implementador ↔ QA permanece na Fase 4.
 
 ## Fase 4: ciclo adversarial de engenharia
 
