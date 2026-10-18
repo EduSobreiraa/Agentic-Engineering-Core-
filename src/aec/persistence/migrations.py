@@ -121,6 +121,22 @@ MIGRATIONS = (
         PRIMARY KEY(run_id, number)
     );
     """,
+    """
+    CREATE TABLE documentation_records (
+        document_id TEXT PRIMARY KEY,
+        request_message_id TEXT NOT NULL UNIQUE REFERENCES messages(message_id),
+        run_id TEXT NOT NULL,
+        task_id TEXT NOT NULL,
+        document_type TEXT NOT NULL,
+        content TEXT NOT NULL,
+        sha256 TEXT NOT NULL,
+        artifact_ref TEXT NOT NULL,
+        source_refs TEXT NOT NULL,
+        validation_status TEXT NOT NULL,
+        warnings TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    );
+    """,
 )
 
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from enum import StrEnum
 from typing import Annotated, Any, Literal
@@ -21,6 +22,9 @@ class MessageType(StrEnum):
     APPROVAL_REQUEST = "APPROVAL_REQUEST"
     TASK_COMPLETED = "TASK_COMPLETED"
     TASK_FAILED = "TASK_FAILED"
+    DOCUMENTATION_REQUEST = "DOCUMENTATION_REQUEST"
+    DOCUMENTATION_GENERATED = "DOCUMENTATION_GENERATED"
+    DOCUMENTATION_FAILED = "DOCUMENTATION_FAILED"
 
 
 class Contract(BaseModel):
@@ -102,6 +106,37 @@ class TaskFailed(Contract):
     reason: Annotated[str, Field(min_length=1)]
 
 
+class DocumentationRequest(Contract):
+    run_id: Annotated[str, Field(min_length=1)]
+    task_id: Annotated[str, Field(min_length=1)]
+    documentation_type: Literal[
+        "execution-report",
+        "qa-summary",
+        "change-summary",
+        "adr",
+        "technical-documentation",
+    ]
+    artifact_refs: list[ArtifactRef] = Field(default_factory=list)
+    target_scope: Annotated[str, Field(min_length=1)]
+    requested_by: Annotated[str, Field(min_length=1)]
+    correlation_id: Annotated[str, Field(min_length=1)]
+
+
+class DocumentationResult(Contract):
+    document_id: Annotated[str, Field(min_length=1)]
+    document_type: Annotated[str, Field(min_length=1)]
+    generated_artifact_ref: ArtifactRef
+    source_refs: list[ArtifactRef] = Field(default_factory=list)
+    validation_status: Literal["VALID", "VALID_WITH_WARNINGS", "INVALID"]
+    warnings: list[str] = Field(default_factory=list)
+    timestamp: datetime
+
+
+class DocumentationFailure(Contract):
+    request_message_id: Annotated[str, Field(min_length=1)]
+    reason: Annotated[str, Field(min_length=1)]
+
+
 Payload = (
     TaskAssigned
     | ArtifactSubmitted
@@ -113,6 +148,9 @@ Payload = (
     | ApprovalRequest
     | TaskCompleted
     | TaskFailed
+    | DocumentationRequest
+    | DocumentationResult
+    | DocumentationFailure
 )
 
 PAYLOADS: dict[MessageType, type[Contract]] = {
@@ -126,6 +164,9 @@ PAYLOADS: dict[MessageType, type[Contract]] = {
     MessageType.APPROVAL_REQUEST: ApprovalRequest,
     MessageType.TASK_COMPLETED: TaskCompleted,
     MessageType.TASK_FAILED: TaskFailed,
+    MessageType.DOCUMENTATION_REQUEST: DocumentationRequest,
+    MessageType.DOCUMENTATION_GENERATED: DocumentationResult,
+    MessageType.DOCUMENTATION_FAILED: DocumentationFailure,
 }
 
 
@@ -165,7 +206,11 @@ class Message(Contract):
             expected = PAYLOADS[MessageType(data["type"])]
             payload = data.get("payload")
             data = dict(data)
-            data["payload"] = expected.model_validate(payload)
+            data["payload"] = (
+                expected.model_validate_json(json.dumps(payload))
+                if isinstance(payload, dict)
+                else expected.model_validate(payload)
+            )
         return data
 
     @model_validator(mode="after")
