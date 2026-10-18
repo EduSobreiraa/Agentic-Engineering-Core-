@@ -8,6 +8,6 @@ To run the real two-agent demo, explicitly invoke:
 uv run python -m aec.execution.demo --database /tmp/aec-phase2.sqlite --workspace /tmp/aec-phase2-work
 ```
 
-The demo uses two read-only Codex turns, consumes subscription capacity, and writes AEC results and artifacts to the specified paths. Use fresh paths for an independent run. Omitting both options uses a temporary directory and removes the AEC results after display. The standard test suite does not invoke a real model turn. A separate two-turn read-only check on 2026-10-18 verified real session resume after correcting the adapter's non-Git workspace flag.
+The demo uses two read-only Codex turns, consumes subscription capacity, and writes AEC results and artifacts to the specified paths. Use fresh paths for an independent run. Omitting both options uses a temporary directory and removes the AEC results after display. The standard test suite does not invoke a real model turn.
 
-To run the real end-to-end pytest scenario in temporary directories, set `AEC_RUN_REAL_CODEX=1` for that invocation. It uses two Codex turns. Without that variable, pytest reports the case as skipped.
+To run the real scenarios in temporary directories, set `AEC_RUN_REAL_CODEX=1` for that invocation. The two-agent exchange and session-resume checks use two read-only Codex turns each. The resume check uses one non-Git directory and asserts that both turns retain the same provider session ID. Without the variable, pytest skips both cases.
