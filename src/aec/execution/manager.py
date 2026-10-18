@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
@@ -16,6 +17,7 @@ from aec.communication.schemas import (
     Message,
     MessageType,
     ReviewRequest,
+    TaskAssigned,
 )
 from aec.security.identities import Identity, Role
 
@@ -32,12 +34,14 @@ class ExecutionManager:
         allowed_roots: list[Path],
         *,
         max_concurrency: int = 2,
+        writable_agents: frozenset[str] = frozenset(),
     ) -> None:
         if not allowed_roots or max_concurrency < 1:
             raise ValueError("allowed_roots and positive concurrency are required")
         self.broker = broker
         self.adapters = adapters
         self.allowed_roots = [root.resolve(strict=True) for root in allowed_roots]
+        self.writable_agents = writable_agents
         forbidden = {
             Path("/"),
             Path("/etc"),
@@ -73,6 +77,16 @@ class ExecutionManager:
         )
         if identity.role not in (Role.IMPLEMENTER, Role.QA) or source.type != expected:
             raise PermissionError("role cannot execute this ACP message")
+        if (
+            isinstance(source.payload, TaskAssigned)
+            and request.prompt != source.payload.instructions
+        ):
+            raise PermissionError("prompt does not match ACP assignment")
+        if request.sandbox_mode == "workspace-write" and (
+            identity.agent_id not in self.writable_agents
+            or source.metadata.get("workspace_write") is not True
+        ):
+            raise PermissionError("agent is not authorized for workspace-write")
         if not any(
             request.working_directory == root
             or root in request.working_directory.parents
@@ -168,6 +182,14 @@ class ExecutionManager:
                     )
                 )
                 result.session_id = internal_id
+            if result.status == ExecutionStatus.SUCCEEDED and isinstance(
+                source.payload, ReviewRequest
+            ):
+                try:
+                    self._finding(source.payload, result.output)
+                except ValueError:
+                    result.status = ExecutionStatus.FAILED
+                    result.error = "invalid_qa_output"
             if result.status == ExecutionStatus.SUCCEEDED:
                 try:
                     result.artifact_refs = [self._store_output(request, result.output)]
@@ -204,11 +226,7 @@ class ExecutionManager:
         payload: FindingReported | ArtifactSubmitted
         if isinstance(source.payload, ReviewRequest):
             kind = MessageType.FINDING_REPORTED
-            payload = FindingReported(
-                artifact_id=source.payload.artifact_id,
-                severity="low",
-                description=result.output[:4000],
-            )
+            payload = self._finding(source.payload, result.output)
         else:
             kind = MessageType.ARTIFACT_SUBMITTED
             payload = ArtifactSubmitted(
@@ -231,6 +249,16 @@ class ExecutionManager:
             metadata={"execution_id": result.execution_id},
         )
         self.broker.publish(message, identity)
+
+    @staticmethod
+    def _finding(review: ReviewRequest, output: str) -> FindingReported:
+        data = json.loads(output)
+        if not isinstance(data, dict) or set(data) != {"severity", "description"}:
+            raise ValueError("QA must return severity and description")
+        finding = FindingReported.model_validate(
+            {**data, "artifact_id": review.artifact_id}
+        )
+        return finding.model_copy(update={"description": finding.description[:4000]})
 
     async def cancel(self, execution_id: str) -> bool:
         for adapter in self.adapters.values():

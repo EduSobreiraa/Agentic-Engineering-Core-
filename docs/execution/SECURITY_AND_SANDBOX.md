@@ -1,6 +1,6 @@
 # Security and sandbox
 
-The default execution mode is `read-only`. Requests may select `workspace-write` under an explicit allowed root. The manager rejects execution in `/`, `/etc`, `/usr`, `/var`, the user's home directory, and the Codex configuration directory as roots. Paths resolve before the root check. Subprocess arguments are passed as a list, without `shell=True`.
+The default execution mode is `read-only`. Requests may select `workspace-write` only when the agent appears in the manager's `writable_agents` grant and the orchestrator's ACP assignment has `metadata.workspace_write=true`. The directory must be under an allowed root. The manager rejects execution in `/`, `/etc`, `/usr`, `/var`, the user's home directory, and the Codex configuration directory as roots. Paths resolve before the root check. Subprocess arguments are passed as a list, without `shell=True`.
 
 The manager does not accept a text request as permission to publish privileged ACP messages. It checks the broker-issued identity and a persisted `TASK_ASSIGNED` or `REVIEW_REQUEST`. The demo gives A and B different directories and does not share a provider session.
 

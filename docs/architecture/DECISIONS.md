@@ -78,6 +78,6 @@ Estas decisões foram aceitas no escopo inicial. Mudanças futuras devem acresce
 
 **Contexto:** um ACK do ACP não garante que um processo externo executou uma única vez. O Codex pode modificar arquivos antes de uma interrupção.
 
-**Decisão:** o manager exige identidade local válida e uma atribuição ACP persistida, vincula cada mensagem de origem a no máximo uma execução, grava estados e nunca reinicia automaticamente turnos interrompidos. Somente o manager publica resultados com identidade autorizada. Sessões internas AEC e IDs do Codex ficam separados. O isolamento de escrita por diretório vale dentro de um único manager.
+**Decisão:** o manager exige identidade local válida e uma atribuição ACP persistida, vincula cada mensagem de origem a no máximo uma execução, grava estados e nunca reinicia automaticamente turnos interrompidos. `workspace-write` exige concessão ao agente no manager e `metadata.workspace_write=true` na atribuição do orquestrador. Somente o manager publica resultados com identidade autorizada. Sessões internas AEC e IDs do Codex ficam separados. O isolamento de escrita por diretório vale dentro de um único manager.
 
 **Efeito:** o SQLite conserva resultado e histórico para inspeção. A implantação deve usar um manager ativo por banco; coordenação entre processos requer projeto posterior. Código gerado não aprova seu próprio quality gate.

@@ -10,7 +10,7 @@ from tempfile import TemporaryDirectory
 from uuid import uuid4
 
 from aec.communication.broker import Broker
-from aec.communication.schemas import Message, MessageType, TaskAssigned
+from aec.communication.schemas import Message, MessageType, ReviewRequest, TaskAssigned
 from aec.security.identities import Identity, Role
 
 from .adapters.codex_cli import CodexCliAdapter
@@ -120,6 +120,7 @@ async def run_demo(
         claimed_review is not None
         and claimed_review.message.message_id == review.message_id
     )
+    assert isinstance(review.payload, ReviewRequest)
     second = await manager.execute(
         ExecutionRequest(
             execution_id=str(uuid4()),
@@ -128,8 +129,9 @@ async def run_demo(
             agent_id=qa.agent_id,
             executor="codex",
             prompt=(
-                "Revise criticamente esta proposta e descreva um achado concreto:\n"
-                + first.output
+                review.payload.criteria
+                + "\nResponda apenas JSON com severity (low, medium, high ou critical) "
+                "e description.\nProposta:\n" + first.output
             ),
             working_directory=b_dir,
             sandbox_mode="read-only",
