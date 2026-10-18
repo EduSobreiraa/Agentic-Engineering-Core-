@@ -49,9 +49,9 @@ SQLite será a fonte inicial de verdade para tarefas, mensagens, estados e aprov
 
 O [ACP v0.1](../protocols/ACP_SPEC.md) define gravação antes da entrega, lease, ACK, recibos únicos e recuperação. A retenção atual é indefinida. Ações externas e aprovação humana permanecem fora do broker.
 
-O [Workflow Engine](../workflows/WORKFLOW_ENGINE.md) persiste a definição e o hash por execução, coordena etapas acíclicas, registra aprovações locais e usa o ACP e o Execution Manager. Não autentica pessoas ou coordena managers em processos distintos. Resultado externo desconhecido interrompe o workflow sem repetição automática.
+O [Workflow Engine](../workflows/WORKFLOW_ENGINE.md) persiste a definição e o hash por execução, coordena etapas acíclicas, registra aprovações locais e usa o ACP e o Execution Manager. Travas locais coordenam processos independentes sobre o mesmo SQLite; o motor não autentica pessoas nem fornece coordenação distribuída. Resultado externo desconhecido interrompe o workflow sem repetição automática.
 
-A [Execution Layer](../execution/EXECUTION_LAYER.md) grava turnos e sessões no mesmo SQLite. Ao reiniciar, marca turnos em andamento como `INTERRUPTED`, sem repetir efeitos externos. O manager usa um semáforo por processo e uma trava por diretório; uma instalação deve ter um único manager ativo para o banco.
+A [Execution Layer](../execution/EXECUTION_LAYER.md) grava turnos e sessões no mesmo SQLite. Ao reiniciar, marca turnos em andamento como `INTERRUPTED` somente se não houver lock de execução ativo, sem repetir efeitos externos. O manager usa um semáforo por processo e travas locais por execução e workspace. O scheduler também mantém uma trava local por workflow. A [política de execução](../execution/SECURITY.md) bloqueia projetos que o operador não declarou confiáveis; ela não fornece isolamento de sistema operacional.
 
 O [Worker de Documentação](../documentation-worker/ARCHITECTURE.md) lê registros tipados dessas camadas e grava relatórios históricos no mesmo SQLite, com um artefato Markdown e SHA-256. Um validador registrado permite que o Workflow Engine peça documentação pelo ACP. Revisões de ADR também ficam no SQLite, vinculadas à execução. A documentação técnica é uma proposta renderizada; o worker não altera projetos externos ou decisões humanas.
 

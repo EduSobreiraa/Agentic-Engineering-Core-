@@ -13,7 +13,11 @@ from aec.engineering.loop import AdversarialLoop
 from aec.execution.base import ExecutionAdapter
 from aec.execution.manager import ExecutionManager
 from aec.execution.models import ExecutionRequest, ExecutionResult, ExecutionStatus
+from aec.execution.policy import ExecutionPolicy
+from aec.methodology.contracts import MethodologyVersion
+from aec.methodology.governance import MethodologyRegistry
 from aec.security.identities import Role
+from aec.workflows.models import WorkflowDefinition
 
 
 def git(path: Path, *args: str) -> None:
@@ -159,6 +163,7 @@ def setup(
         broker,
         {"simulated": adapter},
         [worktrees],
+        policy=ExecutionPolicy((tmp_path,)),
         writable_agents=frozenset({"implementer"}),
     )
     loop = AdversarialLoop(
@@ -183,6 +188,104 @@ def setup(
         local_approvers=frozenset({"supervisor"}),
     )
     return loop, adapter
+
+
+def setup_published(
+    tmp_path: Path, type_check_passes: bool = True
+) -> tuple[AdversarialLoop, SimulatedAgents]:
+    baseline, adapter = setup(tmp_path)
+    definition = WorkflowDefinition.model_validate(
+        {
+            "id": "dev-adversarial",
+            "version": "1.1.0",
+            "name": "Adversarial with type check",
+            "steps": [
+                {
+                    "id": "implement",
+                    "type": "agent",
+                    "agent": "implementer",
+                    "executor": "simulated",
+                    "inputs": {"prompt": "implement"},
+                },
+                {
+                    "id": "type_check",
+                    "type": "validation",
+                    "validator": "type_check",
+                    "depends_on": ["implement"],
+                },
+                {
+                    "id": "qa",
+                    "type": "agent",
+                    "agent": "qa",
+                    "executor": "simulated",
+                    "depends_on": ["implement", "type_check"],
+                    "inputs": {"prompt": "review", "artifact_id": "artifact"},
+                },
+                {"id": "approval", "type": "human_approval", "depends_on": ["qa"]},
+            ],
+        }
+    )
+    MethodologyRegistry(
+        baseline.broker.db, validators=frozenset({"type_check"})
+    ).seed(
+        MethodologyVersion(
+            methodology_id="dev-adversarial",
+            version="1.1.0",
+            definition=definition,
+            mandatory_gates=frozenset({"type_check"}),
+        ),
+        actor="test-bootstrap",
+    )
+    gate = CommandGate(
+        gate_id="type_check",
+        argv=("python3", "-c", "raise SystemExit(0)")
+        if type_check_passes
+        else ("python3", "-c", "raise SystemExit(1)"),
+    )
+    loop = AdversarialLoop(
+        baseline.broker,
+        baseline.manager,
+        baseline.orchestrator,
+        baseline.implementer,
+        baseline.qa,
+        baseline.quality_gate,
+        baseline.repository,
+        baseline.worktree_root,
+        baseline.gates + (gate,),
+        executor="simulated",
+        max_iterations=2,
+        local_approvers=frozenset({"supervisor"}),
+        methodology_version="1.1.0",
+    )
+    return loop, adapter
+
+
+def test_published_version_runs_type_check_before_qa(tmp_path: Path) -> None:
+    loop, adapter = setup_published(tmp_path)
+    run_id = loop.create("divide", "Fix zero handling", ("zero raises",), ("calc.py",))
+    assert asyncio.run(loop.run(run_id)) == "WAITING_APPROVAL"
+    assert adapter.implementations == 2
+    with loop.broker.db.connect() as connection:
+        binding = connection.execute(
+            "SELECT version FROM methodology_run_bindings WHERE run_id=?", (run_id,)
+        ).fetchone()
+    assert binding["version"] == "1.1.0"
+    gate = loop.broker.get_message(f"gate:{run_id}:1:type_check")
+    assert gate is not None
+    history = loop.history(run_id)["messages"]
+    reviews = [message for message in history if message["type"] == "REVIEW_REQUEST"]
+    assert reviews and gate.created_at.isoformat() < reviews[0]["created_at"]
+
+
+def test_failed_published_pre_qa_gate_blocks_review(tmp_path: Path) -> None:
+    loop, adapter = setup_published(tmp_path, type_check_passes=False)
+    run_id = loop.create("divide", "Fix zero handling", ("zero raises",), ("calc.py",))
+    assert asyncio.run(loop.run(run_id)) == "BLOCKED"
+    assert adapter.implementations == 1
+    assert not any(
+        message["type"] == "REVIEW_REQUEST"
+        for message in loop.history(run_id)["messages"]
+    )
 
 
 def test_two_iterations_reach_human_approval(tmp_path: Path) -> None:
@@ -220,6 +323,65 @@ def test_two_iterations_reach_human_approval(tmp_path: Path) -> None:
     assert (tmp_path / "project" / "calc.py").read_text() == (
         "def divide(a, b):\n    pass\n"
     )
+
+
+def test_second_controller_waits_for_same_run(tmp_path: Path) -> None:
+    class HoldingAgents(SimulatedAgents):
+        def __init__(self) -> None:
+            super().__init__()
+            self.started = asyncio.Event()
+            self.release = asyncio.Event()
+
+        async def execute(
+            self, request: ExecutionRequest, provider_session_id: str | None = None
+        ) -> ExecutionResult:
+            if request.agent_id == "implementer" and self.implementations == 0:
+                self.started.set()
+                await self.release.wait()
+            return await super().execute(request, provider_session_id)
+
+    loop, _ = setup(tmp_path)
+    adapter = HoldingAgents()
+    loop.manager.adapters["simulated"] = adapter
+    run_id = loop.create("divide", "Fix zero handling", ("zero raises",), ("calc.py",))
+
+    async def scenario() -> None:
+        first = asyncio.create_task(loop.run(run_id))
+        await adapter.started.wait()
+        other_manager = ExecutionManager(
+            loop.broker,
+            {"simulated": adapter},
+            [tmp_path / "worktrees"],
+            policy=ExecutionPolicy((tmp_path,)),
+            writable_agents=frozenset({"implementer"}),
+        )
+        second_loop = AdversarialLoop(
+            loop.broker,
+            other_manager,
+            loop.orchestrator,
+            loop.implementer,
+            loop.qa,
+            loop.quality_gate,
+            loop.repository,
+            loop.worktree_root,
+            loop.gates,
+            executor="simulated",
+            max_iterations=2,
+            local_approvers=frozenset({"supervisor"}),
+        )
+        second = asyncio.create_task(second_loop.run(run_id))
+        await asyncio.sleep(0.05)
+        assert second_loop.history(run_id)["run"]["status"] == "RUNNING"
+        with pytest.raises(RuntimeError, match="another controller"):
+            await second_loop.cancel(run_id, "supervisor")
+        adapter.release.set()
+        assert tuple(await asyncio.gather(first, second)) == (
+            "WAITING_APPROVAL",
+            "WAITING_APPROVAL",
+        )
+
+    asyncio.run(scenario())
+    assert adapter.implementations == 2
 
 
 def test_iteration_limit_blocks(tmp_path: Path) -> None:
@@ -287,6 +449,7 @@ def test_history_and_approval_survive_restart(tmp_path: Path) -> None:
         broker,
         {"simulated": SimulatedAgents()},
         [tmp_path / "worktrees"],
+        policy=ExecutionPolicy((tmp_path,)),
         writable_agents=frozenset({"implementer"}),
     )
     restarted = AdversarialLoop(
@@ -341,6 +504,69 @@ def test_interruption_before_correction_resumes_once(
     monkeypatch.setattr(loop, "_agent", original)
     assert asyncio.run(loop.run(run_id)) == "WAITING_APPROVAL"
     assert adapter.implementations == 2
+
+
+def test_commit_captured_before_database_failure_is_recovered(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    loop, adapter = setup(tmp_path)
+    run_id = loop.create("divide", "Fix zero handling", ("zero raises",), ("calc.py",))
+    original = loop._save
+
+    def fail_before_save(*args: object, **kwargs: object) -> None:
+        if len(args) >= 3 and args[2] == "IMPLEMENTED":
+            raise KeyboardInterrupt("database unavailable after commit")
+        original(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(loop, "_save", fail_before_save)
+    with pytest.raises(KeyboardInterrupt):
+        asyncio.run(loop.run(run_id))
+    assert adapter.implementations == 1
+    assert loop.history(run_id)["iterations"][0]["status"] == "PREPARED"
+    broker = Broker(tmp_path / "aec.sqlite")
+    manager = ExecutionManager(
+        broker,
+        {"simulated": adapter},
+        [tmp_path / "worktrees"],
+        policy=ExecutionPolicy((tmp_path,)),
+        writable_agents=frozenset({"implementer"}),
+    )
+    resumed = AdversarialLoop(
+        broker,
+        manager,
+        broker.register("orchestrator", Role.ORCHESTRATOR),
+        broker.register("implementer", Role.IMPLEMENTER),
+        broker.register("qa", Role.QA),
+        broker.register("quality-gate", Role.QUALITY_GATE),
+        tmp_path / "project",
+        tmp_path / "worktrees",
+        loop.gates,
+        executor="simulated",
+        max_iterations=2,
+        local_approvers=frozenset({"supervisor"}),
+    )
+    assert asyncio.run(resumed.run(run_id)) == "WAITING_APPROVAL"
+    assert adapter.implementations == 2
+
+
+def test_unrelated_commit_is_not_recovered(tmp_path: Path) -> None:
+    loop, adapter = setup(tmp_path)
+    run_id = loop.create("divide", "Fix zero handling", ("zero raises",), ("calc.py",))
+    worktree = Path(loop.history(run_id)["run"]["worktree_path"])
+    (worktree / "calc.py").write_text("def divide(a, b):\n    return 0\n")
+    git(worktree, "add", "calc.py")
+    git(
+        worktree,
+        "-c",
+        "user.name=Other",
+        "-c",
+        "user.email=other@localhost",
+        "commit",
+        "-qm",
+        "unrelated change",
+    )
+    assert asyncio.run(loop.run(run_id)) == "BLOCKED"
+    assert adapter.implementations == 0
 
 
 def test_artifact_change_after_validation_prevents_approval(tmp_path: Path) -> None:

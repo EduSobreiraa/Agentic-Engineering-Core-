@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+from aec.engineering.gates import run_gates
 from aec.engineering.git import capture, commit_hash
 from aec.engineering.models import (
     ImplementationResult,
@@ -11,6 +12,7 @@ from aec.engineering.models import (
     ReviewFinding,
     ReworkRequest,
 )
+from aec.execution.policy import ExecutionPolicy
 
 
 def test_review_contract_rejects_unproved_failure() -> None:
@@ -107,3 +109,17 @@ def test_capture_rejects_out_of_scope_change(tmp_path: Path) -> None:
     (tmp_path / "other.py").write_text("pass\n")
     with pytest.raises(PermissionError):
         capture(tmp_path, ("allowed.py",))
+
+
+def test_untrusted_snapshot_cannot_run_gates(tmp_path: Path) -> None:
+    trusted = tmp_path / "trusted"
+    untrusted = tmp_path / "untrusted"
+    trusted.mkdir()
+    untrusted.mkdir()
+    with pytest.raises(PermissionError, match="not trusted"):
+        run_gates(
+            untrusted,
+            "a" * 40,
+            (),
+            policy=ExecutionPolicy((trusted,)),
+        )

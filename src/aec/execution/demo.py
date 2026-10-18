@@ -16,6 +16,7 @@ from aec.security.identities import Identity, Role
 from .adapters.codex_cli import CodexCliAdapter
 from .manager import ExecutionManager
 from .models import ExecutionRequest, ExecutionStatus
+from .policy import ExecutionPolicy
 
 
 def _send(
@@ -59,7 +60,13 @@ async def run_demo(
     orchestrator = broker.register("orchestrator", Role.ORCHESTRATOR)
     implementer = broker.register("implementer", Role.IMPLEMENTER)
     qa = broker.register("qa", Role.QA)
-    manager = ExecutionManager(broker, {"codex": adapter or CodexCliAdapter()}, [root])
+    policy = ExecutionPolicy((root,))
+    manager = ExecutionManager(
+        broker,
+        {"codex": adapter or CodexCliAdapter(policy=policy)},
+        [root],
+        policy=policy,
+    )
     run_id, task_id = str(uuid4()), str(uuid4())
     task = _send(
         broker,

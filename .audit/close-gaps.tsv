@@ -1,0 +1,17 @@
+ts	phase	decision	why	evidence	result
+2026-10-18T16:30:06-03:00	recovery	recover controller commit after database interruption	avoid repeating an agent when the captured commit and artifacts are intact	3214ae1	tests green
+2026-10-18T16:32:09-03:00	metrics	calculate document completeness only from a published manifest and verified records	unknown requirements cannot be reported as zero or complete	76122c8	tests green
+2026-10-18T16:34:48-03:00	execution	preserve non Git workspace policy on Codex session resume	resumed CLI calls had failed before reaching the model	e82f7df	real read-only resume passed
+2026-10-18T16:37:02-03:00	execution	lock local execution and workspace ownership across managers	prevent two processes from using one writable workspace	01e12a6	tests green
+2026-10-18T16:39:25-03:00	methodology	run published pre-QA gates in the adversarial loop	make approved declarative versions affect execution	7d327fb	tests green
+2026-10-18T16:42:12-03:00	workflows	lock local workflow and adversarial run ownership	prevent duplicate agent turns from concurrent controllers	29be32a	tests green
+2026-10-18T16:43:29-03:00	workflows	create published workflow and methodology binding in one transaction	prevent orphan runs if the binding fails	4d65d02	tests green
+2026-10-18T16:46:00-03:00	methodology	keep empirical benchmark automation pending	no trusted runner executes equivalent candidate and baseline tasks; fixture pairs alone do not prove improvement	docs/methodology-worker/ARCHITECTURE.md	open
+2026-10-18T16:46:00-03:00	security	keep remote identity and OS sandbox limits explicit	local allowlists and worktrees cannot prove remote identity or confine arbitrary gate commands	docs/ROADMAP.md	open
+2026-10-18T16:45:53-03:00	audit	correct timestamps of the two preceding open-limit rows	those decisions were logged before 16:46 local time	.audit/close-gaps.tsv	preceding timestamps superseded
+2026-10-18T16:45:53-03:00	verification	rerun the opt-in real Codex scenario after implementation changes	check adapter and orchestration against the installed CLI	tests/scenarios/test_real_codex_opt_in.py	1 passed in 15.78s
+2026-10-18T16:47:00-03:00	verification	run the required lint, type, and full default test gates	check the integrated branch after all seven changes	pyproject.toml	Ruff passed; mypy 63 files; pytest 122 passed, 1 skipped
+2026-10-18T19:46:46Z	audit	supersede the previous verification row with captured command output	the pyproject pointer did not show test results and its timestamp was premature	.audit/verification.txt	Ruff passed; mypy 63 files; pytest 122 passed, 1 skipped
+2026-10-18T19:49:41Z	execution	add a reproducible real Codex session-resume scenario	the earlier real run was not encoded as a repeatable test	8b4ad1f, .audit/real-codex-verification.txt	2 opt-in real tests passed
+2026-10-18T19:49:44Z	audit	qualify cross-process and commit-recovery claims	independent review found end-to-end cross-process coverage absent and recovery constrained to a direct controller child commit	docs/ROADMAP.md, docs/architecture/DECISIONS.md	limits explicit; no broader claim
+2026-10-18T19:49:58Z	verification	complete the final automated checks after adding the real resume scenario	verify the branch after its last code change	.audit/verification.txt, .audit/real-codex-verification.txt	Ruff pass; mypy 63 files; pytest 122 passed and 2 opt-in skips; real opt-in 2 passed

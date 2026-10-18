@@ -1,0 +1,7 @@
+# Execução local e confiança do projeto
+
+`ExecutionPolicy` exige que o operador configure raízes de projetos locais confiáveis. `ExecutionManager`, `CodexCliAdapter`, o controlador adversarial e os command gates verificam o caminho resolvido antes de executar processos. Por padrão, a ausência da política impede a construção desses pontos de execução. Raízes amplas como `/`, `/tmp`, a home inteira e diretórios do sistema ou de sessão Codex são recusadas. Caminhos fora das raízes, inclusive symlinks que resolvem para fora, são bloqueados.
+
+O operador só deve declarar como confiável um projeto que controla e cujos comandos, dependências e arquivos aceitaria executar na própria máquina. Um clone externo, contribuição desconhecida ou pacote de origem não confiável continua bloqueado até haver confinamento adequado de sistema operacional. Não há sandbox de kernel, contêiner ou isolamento de rede fornecido pelo AEC. A política é uma barreira de admissão para chamadas da biblioteca; código Python hostil executado no mesmo processo pode contorná-la. As travas multiprocesso dependem de POSIX e do mesmo sistema de arquivos local.
+
+Para rodar o demo local, configure uma raiz específica e confiável por `ExecutionPolicy((project_path,))` no ponto de composição. Não use essa declaração para automatizar a avaliação de projetos externos. Um resultado externo perdido após falha permanece `INTERRUPTED` para reconciliação manual.

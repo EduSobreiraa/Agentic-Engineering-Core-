@@ -165,6 +165,51 @@ MIGRATIONS = (
     BEFORE DELETE ON adr_records
     BEGIN SELECT RAISE(ABORT, 'ADR revision is immutable'); END;
     """,
+    """
+    CREATE TABLE methodology_versions (
+        methodology_id TEXT NOT NULL, version TEXT NOT NULL,
+        definition TEXT NOT NULL, sha256 TEXT NOT NULL,
+        published_at TEXT NOT NULL, approved_by TEXT NOT NULL,
+        proposal_id TEXT, PRIMARY KEY(methodology_id, version)
+    );
+    CREATE TABLE methodology_active (
+        methodology_id TEXT PRIMARY KEY, version TEXT NOT NULL
+    );
+    CREATE TABLE methodology_proposals (
+        proposal_id TEXT PRIMARY KEY, content TEXT NOT NULL,
+        sha256 TEXT NOT NULL, status TEXT NOT NULL,
+        evaluation TEXT, approval_by TEXT, approval_at TEXT
+    );
+    CREATE TABLE methodology_events (
+        event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        proposal_id TEXT NOT NULL, kind TEXT NOT NULL,
+        actor TEXT, detail TEXT, created_at TEXT NOT NULL
+    );
+    CREATE TABLE methodology_run_bindings (
+        run_id TEXT PRIMARY KEY, methodology_id TEXT NOT NULL,
+        version TEXT NOT NULL, sha256 TEXT NOT NULL
+    );
+    CREATE TABLE methodology_documents (
+        document_id TEXT PRIMARY KEY,
+        proposal_id TEXT NOT NULL REFERENCES methodology_proposals(proposal_id),
+        document_type TEXT NOT NULL,
+        content TEXT NOT NULL, sha256 TEXT NOT NULL,
+        artifact_ref TEXT NOT NULL, created_at TEXT NOT NULL,
+        UNIQUE(proposal_id, document_type)
+    );
+    CREATE TRIGGER methodology_documents_no_update
+    BEFORE UPDATE ON methodology_documents
+    BEGIN SELECT RAISE(ABORT, 'historical document is immutable'); END;
+    CREATE TRIGGER methodology_documents_no_delete
+    BEFORE DELETE ON methodology_documents
+    BEGIN SELECT RAISE(ABORT, 'historical document is immutable'); END;
+    CREATE TRIGGER methodology_versions_no_update
+    BEFORE UPDATE ON methodology_versions
+    BEGIN SELECT RAISE(ABORT, 'published methodology is immutable'); END;
+    CREATE TRIGGER methodology_versions_no_delete
+    BEFORE DELETE ON methodology_versions
+    BEGIN SELECT RAISE(ABORT, 'published methodology is immutable'); END;
+    """,
 )
 
 

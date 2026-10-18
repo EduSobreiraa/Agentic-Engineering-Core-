@@ -39,11 +39,11 @@ Cada item tem um identificador estável para vincular issues, commits e evidênc
 - [x] F2-04 Executar tarefas não interativas. Evidência: `exec --json` confirmado na CLI 0.163.0; dois turnos reais read-only no demo de workflow em 2026-10-18.
 - [x] F2-05 Capturar respostas e resultados estruturados. Evidência: testes do parser JSONL e resultados reais persistidos no run `5df4cc7c-48cd-4d4b-90c5-5e5db4a0e0d3`.
 - [x] F2-06 Implementar timeouts e tratamento de falhas. Evidência: testes de timeout e estados.
-- [x] F2-07 Investigar persistência e retomada de sessões Codex. Evidência: `exec resume --help`, tabela `agent_sessions`; retomada real pendente.
-- [ ] F2-08 Implementar isolamento de diretórios e worktrees. Diretórios distintos e trava por manager implementados; worktrees automáticos e coordenação entre processos pendentes.
+- [x] F2-07 Investigar persistência e retomada de sessões Codex. Evidência: `agent_sessions`, teste do adapter e `test_real_session_resume_in_non_git_directory`, que executa dois turnos Codex reais somente leitura com o mesmo ID de sessão.
+- [x] F2-08 Implementar isolamento de diretórios e worktrees. O manager confina diretórios às raízes autorizadas e usa travas locais por execução e workspace entre processos; o ciclo adversarial cria worktrees automaticamente. Evidência: testes de dois managers no mesmo processo e da primitiva de trava em um segundo processo em `tests/integration/test_execution.py`.
 - [x] F2-09 Testar troca de resultados entre duas execuções Codex. Evidência: cenário ACP com executável falso e troca real de plano para implementação no run `5df4cc7c-48cd-4d4b-90c5-5e5db4a0e0d3`.
 
-**Estado:** execução e troca via ACP verificadas com dois turnos Codex reais read-only. Retomada de sessão real, worktrees automáticos e isolamento entre processos continuam pendentes.
+**Estado:** execução, troca via ACP e retomada de sessão verificadas com Codex real somente leitura. O manager coordena execuções em um sistema de arquivos local; criação de worktrees pertence à metodologia adversarial. Isolamento de segurança em nível de sistema operacional e coordenação de workflows inteiros entre processos não são fornecidos.
 
 ## Fase 3: workflows
 
@@ -57,7 +57,7 @@ Cada item tem um identificador estável para vincular issues, commits e evidênc
 - [x] F3-08 Implementar regras de interrupção. Evidência: timeout, cancelamento e estado `INTERRUPTED` para resultado incerto.
 - [x] F3-09 Recuperar workflows após falhas. Evidência: `recover()` reconcilia resultados conhecidos e preserva aprovação pendente.
 
-**Estado:** motor local de workflows acíclicos, versionados e persistentes implementado com adapter simulado e verificado com dois turnos Codex reais até `WAITING_APPROVAL`. Coordenação entre processos permanece pendente. A Fase 4 acrescentou o ciclo Implementador e QA como metodologia especializada.
+**Estado:** motor local de workflows acíclicos, versionados e persistentes implementado com adapter simulado e verificado com dois turnos Codex reais até `WAITING_APPROVAL`. Travas locais impedem dois motores de executar o mesmo workflow ao mesmo tempo; não há coordenação distribuída. A Fase 4 acrescentou o ciclo Implementador e QA como metodologia especializada.
 
 ## Fase 4: ciclo adversarial de engenharia
 
@@ -71,9 +71,9 @@ Cada item tem um identificador estável para vincular issues, commits e evidênc
 - [x] F4-08 Integrar testes determinísticos. Evidência: `CommandGate` e cenário `unittest`.
 - [x] F4-09 Bloquear conclusão quando houver falhas críticas. Evidência: testes de limite e gate reprovado.
 - [x] F4-10 Exigir aprovação humana antes do merge. Evidência: `WAITING_APPROVAL` e teste de autorização.
-- [x] F4-11 Executar experimento completo em repositório de teste. Evidência: `tests/scenarios/test_adversarial_loop.py`, apenas agentes simulados.
+- [x] F4-11 Executar experimento completo em repositório de teste. Evidência: cenário simulado em `tests/scenarios/test_adversarial_loop.py` e [execução com quatro turnos Codex reais](engineering/REAL_CODEX_EXPERIMENT.md), encerrada em `WAITING_APPROVAL`.
 
-**Conclusão do MVP simulado:** Implementador, QA, correção, validação e aprovação funcionam sem cópia manual de mensagens. A execução real com dois Codex, isolamento de sistema operacional e recuperação de commits após falha de persistência continuam pendentes.
+**Estado:** Implementador, QA, correção e validação funcionaram em uma execução real com Codex; o pedido de aprovação permaneceu pendente, sem decisão humana. Um teste de falha após o commit do controller confirmou recuperação sem repetir o agente. Travas locais impedem dois controllers de executar o mesmo run. Isolamento de sistema operacional e resultados externos ainda desconhecidos continuam pendentes.
 
 ## Fase 5: documentação
 
@@ -88,13 +88,24 @@ Cada item tem um identificador estável para vincular issues, commits e evidênc
 
 ## Fase 6: governança metodológica
 
-- [ ] F6-01 Criar Worker de Metodologia.
-- [ ] F6-02 Implementar métricas de execução.
-- [ ] F6-03 Produzir propostas metodológicas em RFCs.
-- [ ] F6-04 Definir avaliação comparativa de metodologias.
-- [ ] F6-05 Implementar aprovação humana.
-- [ ] F6-06 Publicar novas versões somente após aprovação.
-- [ ] F6-07 Preservar histórico das decisões.
+- [x] F6-01 Criar Worker de Metodologia. Evidência: `methodology/worker.py` e cenário simulado.
+- [x] F6-02 Implementar métricas de execução. Evidência: `methodology/metrics.py`; completude documental é calculada quando a versão declara `required_documents`, com verificação do artefato.
+- [x] F6-03 Produzir propostas metodológicas em RFCs. Evidência: `DocumentationWorker.create_methodology_document()`, registro imutável e cenário simulado.
+- [x] F6-04 Definir avaliação comparativa de metodologias. Evidência: pares tipados, cenário com fixtures e runner local de workflows com evidência persistida.
+- [x] F6-05 Implementar aprovação humana. Evidência: `MethodologyGovernance.decide()` e testes de rejeição.
+- [x] F6-06 Publicar novas versões somente após aprovação. Evidência: publicação transacional, `WorkflowEngine.create_published()` e seleção de versão publicada compatível pelo `AdversarialLoop`, com gate anterior ao QA e vínculo persistido.
+- [x] F6-07 Preservar histórico das decisões. Evidência: `methodology_events`, hashes, versões e vínculos de execução.
+
+**Estado:** funcional no ambiente local supervisionado. O ciclo integra o Documentation Worker da Fase 5 e seleciona versões publicadas compatíveis no `AdversarialLoop`. O benchmark local executa workflows com adapter roteirizado; seus resultados são exploratórios e não medem retrabalho. Versões sem manifesto documental deixam a completude indisponível. A verificação anterior está em `.audit/verification.txt` e `.audit/real-codex-verification.txt`; a verificação do fechamento está em `.audit/f6-hardening-verification.txt`.
+
+## Fechamento da Fase 6 antes da Fase 7
+
+- [x] F6H-01 Hardening multiprocesso (P0). Testes com processos Python independentes, SQLite compartilhado, ACP, manager, workflow, publicação, falha abrupta e recuperação; resultado externo incerto continua `INTERRUPTED`. Evidência: `tests/integration/test_multiprocess.py`.
+- [x] F6H-02 Benchmark Runner mínimo (P1). Tarefas roteirizadas equivalentes, critérios e condições fixados, ambientes separados e métricas obtidas de workflows executados. Evidência: `methodology/benchmark.py` e `tests/integration/test_methodology_benchmark.py`. Resultados pequenos são exploratórios.
+- [x] F6H-03 Segurança operacional (P0). Política explícita de raízes locais confiáveis nos pontos de execução. Projetos externos não declarados são bloqueados. O limite do controle está em `docs/execution/SECURITY.md`.
+- [x] F6H-04 Identidade remota (P2). Requisitos registrados em `docs/methodology-worker/GOVERNANCE.md`; implementação de rede permanece fora do escopo.
+
+O [prompt de fechamento](methodology-worker/PHASE_6_CLOSURE_PROMPT.md) detalha o escopo e os critérios de aceite. A Fase 7 permanece sem implementação nesta branch.
 
 ## Fase 7: expansão metodológica
 

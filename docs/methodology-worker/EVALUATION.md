@@ -1,0 +1,9 @@
+# Avaliação de propostas
+
+O avaliador lê a proposta persistida, confere o hash, monta a candidata com operações declarativas e valida seu grafo. Falha estrutural produz `FAIL`; ausência de evidência comparável produz `INCONCLUSIVE`. A publicação ainda verifica os validadores registrados.
+
+`LocalBenchmarkRunner` executa versões base e candidata em workflows reais com `ExecutionManager`, ACP e SQLite separados por tarefa, repetição e versão. O adapter é roteirizado e determinístico: ele não chama Codex nem executa código do projeto. As duas tarefas iniciais verificam aprovação de tipagem válida e rejeição de tipagem inválida antes do QA. Cada execução conserva banco e workspace, com hashes da definição, dos critérios de aceite e das condições. A ordem das versões alterna entre repetições. A candidata é executada sem ser publicada.
+
+`evaluate_controlled()` compara pares com critérios e condições idênticos. Pode comparar `acceptance_rate`, `agent_invocation_count` e `duration_seconds` quando os dados existem. Regressão de aceite produz `FAIL`; ganho na métrica declarada produz `PASS_WITH_WARNINGS`, pois o adapter roteirizado e a amostra pequena não demonstram causalidade. Métrica indisponível, falha do runner ou comparação incompleta produzem `INCONCLUSIVE`. O workflow genérico não mede iterações de revisão: propostas com `average_review_iterations` continuam inconclusivas nesse runner. Duração está sujeita ao ruído da máquina.
+
+O caminho legado `evaluate()` aceita casos e números fornecidos pelo chamador para testes e fixtures. Ele registra `evidence_kind=FIXTURE`; esses valores não representam execuções do AEC e não autorizam aprovação ou publicação. O caminho controlado registra `evidence_kind=EXECUTED` e os `benchmark_runs`. Uma decisão humana local continua necessária mesmo após `PASS_WITH_WARNINGS`. `INCONCLUSIVE` e `FAIL` não autorizam aprovação pela política atual.

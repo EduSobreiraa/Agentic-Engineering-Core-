@@ -4,4 +4,4 @@ Execute `uv run pytest -q tests/scenarios/test_adversarial_loop.py`. O teste cri
 
 Os testes também cobrem QA que altera o snapshot e um gate reprovado mesmo com QA positivo. Nenhum desses cenários chama o Codex real, faz merge ou modifica o projeto principal.
 
-Para um experimento real isolado, execute explicitamente `uv run python -m aec.engineering.demo --real-codex`. O comando cria um repositório temporário novo, usa no máximo duas iterações e imprime o diretório que preserva banco, sessões e artefatos. Consome a franquia Codex da assinatura. O experimento não foi executado durante a implementação e não faz merge, push ou aprovação automática.
+Para um experimento real isolado, execute explicitamente `uv run python -m aec.engineering.demo --real-codex`. O comando cria um repositório temporário novo, usa no máximo duas iterações e imprime o diretório que preserva banco, sessões e artefatos. Consome a franquia Codex da assinatura e não faz merge, push ou aprovação automática. Uma execução real posterior está registrada em [REAL_CODEX_EXPERIMENT.md](REAL_CODEX_EXPERIMENT.md).

@@ -8,6 +8,7 @@ from hashlib import sha256
 
 from aec.persistence.database import Database
 
+from .locking import LocalLock
 from .models import AgentSession, ExecutionRequest, ExecutionResult, ExecutionStatus
 
 
@@ -18,17 +19,25 @@ class ExecutionRepository:
     def reconcile(self) -> int:
         now = datetime.now(timezone.utc).isoformat()
         with self.db.connect() as db:
-            cursor = db.execute(
-                "UPDATE executions SET status = ?, updated_at = ? "
-                "WHERE status IN (?, ?)",
-                (
-                    ExecutionStatus.INTERRUPTED,
-                    now,
-                    ExecutionStatus.STARTING,
-                    ExecutionStatus.RUNNING,
-                ),
-            )
-            return cursor.rowcount
+            db.execute("BEGIN IMMEDIATE")
+            active = db.execute(
+                "SELECT execution_id FROM executions WHERE status IN (?, ?)",
+                (ExecutionStatus.STARTING, ExecutionStatus.RUNNING),
+            ).fetchall()
+            interrupted = 0
+            for row in active:
+                lock = LocalLock(self.db.path, f"execution:{row['execution_id']}")
+                try:
+                    if lock.try_acquire():
+                        db.execute(
+                            "UPDATE executions SET status=?,updated_at=? "
+                            "WHERE execution_id=?",
+                            (ExecutionStatus.INTERRUPTED, now, row["execution_id"]),
+                        )
+                        interrupted += 1
+                finally:
+                    lock.close()
+            return interrupted
 
     def create(self, request: ExecutionRequest, source_message_id: str) -> bool:
         now = datetime.now(timezone.utc).isoformat()

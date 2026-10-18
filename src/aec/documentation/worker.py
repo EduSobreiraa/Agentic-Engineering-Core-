@@ -18,10 +18,17 @@ from aec.communication.schemas import (
     Message,
     MessageType,
 )
+from aec.methodology.contracts import MethodologyEvaluation, ProposalStatus
+from aec.methodology.governance import ProposalStore
 from aec.security.identities import Identity, Role
 
 from .collector import DocumentationCollector
-from .renderer import change_summary, execution_report, qa_summary
+from .renderer import (
+    change_summary,
+    execution_report,
+    methodology_document,
+    qa_summary,
+)
 
 
 class DocumentationWorker:
@@ -40,6 +47,12 @@ class DocumentationWorker:
                 "WHERE document_id=?",
                 (document_id,),
             ).fetchone()
+            if row is None:
+                row = db.execute(
+                    "SELECT content,sha256,artifact_ref FROM methodology_documents "
+                    "WHERE document_id=?",
+                    (document_id,),
+                ).fetchone()
         if row is None:
             raise KeyError(document_id)
         ref = ArtifactRef.model_validate_json(row["artifact_ref"])
@@ -49,6 +62,158 @@ class DocumentationWorker:
         ] or not self.collector.artifact_intact(ref):
             raise ValueError("document integrity failed")
         return content
+
+    def create_methodology_document(
+        self,
+        proposal_id: str,
+        kind: Literal["rfc", "evaluation", "decision", "publication"],
+    ) -> str:
+        """Render only persisted methodology facts; return the immutable document ID."""
+        proposal, status, proposal_sha = ProposalStore(self.broker.db).get(proposal_id)
+        with self.broker.db.connect() as db:
+            row = db.execute(
+                "SELECT evaluation,approval_by,approval_at FROM methodology_proposals "
+                "WHERE proposal_id=?",
+                (proposal_id,),
+            ).fetchone()
+            publication = db.execute(
+                "SELECT sha256,published_at,approved_by FROM methodology_versions "
+                "WHERE proposal_id=?",
+                (proposal_id,),
+            ).fetchone()
+        fields = [
+            ("Proposta", proposal_id),
+            ("Metodologia", proposal.methodology_id),
+            ("Versões", f"{proposal.base_version} -> {proposal.proposed_version}"),
+            ("Hash da proposta", proposal_sha),
+        ]
+        if kind == "rfc":
+            fields.extend(
+                [
+                    ("Problema", proposal.problem),
+                    ("Hipótese", proposal.hypothesis),
+                    ("Evidências", ", ".join(proposal.evidence_refs)),
+                    (
+                        "Mudança",
+                        ", ".join(
+                            f"{change.operation}: {change.gate} {change.position}"
+                            for change in proposal.changes
+                        ),
+                    ),
+                    (
+                        "Efeito esperado",
+                        f"{proposal.expected_metric}: {proposal.expected_direction}",
+                    ),
+                    ("Riscos", proposal.risks),
+                    ("Validação", proposal.validation_criteria),
+                    ("Reversão", proposal.rollback_plan),
+                ]
+            )
+        elif kind == "evaluation":
+            if row is None or not row["evaluation"]:
+                raise ValueError("evaluation has not been recorded")
+            evaluation = MethodologyEvaluation.model_validate_json(row["evaluation"])
+            if evaluation.proposal_sha256 != proposal_sha:
+                raise ValueError("evaluation proposal hash mismatch")
+            fields.extend(
+                [
+                    ("Resultado", evaluation.verdict.value),
+                    ("Verificações", "; ".join(evaluation.checks)),
+                    ("Limitações", "; ".join(evaluation.limitations)),
+                    (
+                        "Pares",
+                        "; ".join(
+                            f"{pair.task_id}: {pair.baseline} -> {pair.candidate}"
+                            for pair in evaluation.pairs
+                        ),
+                    ),
+                ]
+            )
+        elif kind == "decision":
+            if (
+                row is None
+                or not row["approval_by"]
+                or not row["approval_at"]
+                or status
+                not in {
+                    ProposalStatus.APPROVED,
+                    ProposalStatus.REJECTED,
+                    ProposalStatus.CHANGES_REQUESTED,
+                    ProposalStatus.PUBLISHED,
+                }
+            ):
+                raise ValueError("human decision has not been recorded")
+            fields.extend(
+                [
+                    (
+                        "Decisão",
+                        "APPROVED"
+                        if status == ProposalStatus.PUBLISHED
+                        else status.value,
+                    ),
+                    ("Identidade", str(row["approval_by"])),
+                    ("Data", str(row["approval_at"])),
+                ]
+            )
+        elif kind == "publication":
+            if status != ProposalStatus.PUBLISHED or publication is None:
+                raise ValueError("methodology has not been published")
+            fields.extend(
+                [
+                    ("Hash da versão", str(publication["sha256"])),
+                    ("Aprovador", str(publication["approved_by"])),
+                    ("Publicada em", str(publication["published_at"])),
+                ]
+            )
+        else:
+            raise ValueError("unsupported methodology document type")
+        document_id = hashlib.sha256(f"{proposal_id}:{kind}".encode()).hexdigest()
+        content = methodology_document(kind.upper(), fields)
+        digest = hashlib.sha256(content.encode()).hexdigest()
+        artifact_id = f"{document_id}.md"
+        ref = ArtifactRef(
+            artifact_id=artifact_id,
+            kind="documentation/markdown",
+            uri=f"artifact://{proposal_id}/{artifact_id}",
+            sha256=digest,
+            created_by=self.identity.agent_id,
+        )
+        artifact_root = Path(self.broker.db.path).resolve().parent / "artifacts"
+        directory = artifact_root / hashlib.sha256(proposal_id.encode()).hexdigest()
+        if artifact_root.is_symlink() or directory.is_symlink():
+            raise PermissionError("artifact directory must not be a symlink")
+        directory.mkdir(parents=True, exist_ok=True)
+        path = directory / artifact_id
+        try:
+            with path.open("x", encoding="utf-8") as output:
+                output.write(content)
+        except FileExistsError:
+            if not self.collector.artifact_intact(ref):
+                raise ValueError("historical methodology document differs") from None
+        with self.broker.db.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            prior = db.execute(
+                "SELECT sha256,content FROM methodology_documents WHERE document_id=?",
+                (document_id,),
+            ).fetchone()
+            if prior is None:
+                db.execute(
+                    "INSERT INTO methodology_documents VALUES (?,?,?,?,?,?,?)",
+                    (
+                        document_id,
+                        proposal_id,
+                        kind,
+                        content,
+                        digest,
+                        ref.model_dump_json(),
+                        datetime.now(timezone.utc).isoformat(),
+                    ),
+                )
+            elif prior["sha256"] != digest or prior["content"] != content:
+                raise ValueError(
+                    "historical methodology document cannot be overwritten"
+                )
+        return document_id
 
     def process_next(self) -> DocumentationResult | None:
         delivery = self.broker.claim(self.identity.agent_id, self.identity)

@@ -34,6 +34,13 @@ def render(name: str, fields: dict[str, str]) -> str:
     return Template(template).substitute(fields)
 
 
+def methodology_document(kind: str, fields: list[tuple[str, str]]) -> str:
+    """Render a persisted methodology record without changing its authority."""
+    return f"# {safe(kind)}\n\n" + "\n".join(
+        f"## {safe(label)}\n\n{safe(value)}\n" for label, value in fields
+    )
+
+
 def execution_report(
     evidence: ExecutionEvidence, document_id: str = "indisponível"
 ) -> str:
@@ -102,7 +109,8 @@ def execution_report(
                         for finding in review.findings
                         if finding.file == path
                     )
-                    if review else ""
+                    if review
+                    else ""
                 ) or "indisponível"
                 trace.append(
                     f"| {safe(evidence.task_id)} | {item.number} | {commit} | "
@@ -141,12 +149,14 @@ def execution_report(
                 f"{safe(item.status)} | "
                 f"{item.exit_code if item.exit_code is not None else 'indisponível'} |"
                 for item in evidence.executions
-            ) or "| indisponível | | | |",
+            )
+            or "| indisponível | | | |",
             "state_history": "\n".join(
                 f"| {safe(item.run_id)} | {safe(item.step_id or 'workflow')} | "
                 f"{safe(item.kind)} | {safe(item.created_at)} |"
                 for item in evidence.workflow_events
-            ) or "| indisponível | | | |",
+            )
+            or "| indisponível | | | |",
             "findings": "\n".join(findings_detail) or "- nenhum finding registrado",
             "gate_rows": "\n".join(gate_rows)
             or "| indisponível | | não executado | | |",
@@ -156,7 +166,8 @@ def execution_report(
             "adrs": "\n".join(
                 f"- {safe(adr_id)} revisão {revision}: {safe(status)}, sha256 {digest}"
                 for adr_id, revision, status, digest in evidence.adrs
-            ) or "- nenhuma registrada",
+            )
+            or "- nenhuma registrada",
             "artifacts": "\n".join(f"- {safe(ref)}" for ref in refs)
             or "- nenhum registrado",
             "warnings": "\n".join(f"- {safe(w)}" for w in evidence.warnings)

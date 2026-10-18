@@ -131,3 +131,103 @@ Estas decisões foram aceitas no escopo inicial. Mudanças futuras devem acresce
 **Decisão proposta:** o Worker de Documentação recebe pedidos ACP autorizados, coleta os registros existentes no SQLite e gera relatórios Markdown determinísticos. O mesmo banco guarda IDs, hashes e referências dos documentos históricos. `adr_records` guarda revisões de ADR vinculadas à execução. IDs de pedidos tornam o processamento idempotente. O worker não edita registros históricos, aprovações, políticas ou metodologias. ADRs aceitos exigem uma aprovação humana local vinculada ao próprio ADR.
 
 **Efeito:** o ACP ganha mensagens documentais tipadas e rotas por papel. O Workflow Engine pode solicitar um relatório por um validador registrado, sem criar um executor paralelo. A integridade do arquivo pode ser comparada ao SHA-256 persistido. O limite de um writer por banco e a ausência de autenticação humana entre máquinas continuam válidos.
+
+## ADR-014: Propostas imutáveis e publicação metodológica transacional
+
+**Estado:** implementado na branch da Fase 6 em 2026-10-18; publicação desta mudança sujeita à revisão humana.
+
+**Contexto:** o ACP transporta propostas, mas não autentica aprovações humanas. A Fase 5 já oferece um Worker de Documentação com artefatos imutáveis.
+
+**Decisão:** propostas, avaliações, decisões, versões e vínculos são gravados no SQLite existente pela migração posterior às migrações da Fase 5. O hash da proposta fixa o conteúdo avaliado e aprovado. O worker apenas observa e propõe; `MethodologyGovernance` exige um ator autorizado em `local_approvers` e publica em uma transação. O único operador declarativo inicial adiciona `type_check` antes de QA. O Workflow Engine pode selecionar uma definição publicada por `create_published()`. O Worker de Documentação existente renderiza RFC, avaliação, decisão e publicação a partir dos registros persistidos, com hashes e histórico imutável.
+
+**Efeito:** publicação rejeita versão-base obsoleta, dependência ausente e aprovação inválida. Repetir a mesma publicação não cria outra versão. A autenticação humana permanece local, conforme ADR-011. A adoção pelo `AdversarialLoop` e benchmarks executados pelo AEC continuam pendentes.
+
+## ADR-015: Recuperação conservadora de snapshot de implementação
+
+**Estado:** implementado em 2026-10-18.
+
+**Contexto:** o controller pode criar um commit Git depois que o workflow do agente terminou e antes de registrar o novo head no SQLite. Nesse intervalo, a execução ficava bloqueada após reinício, apesar de o resultado do agente estar persistido.
+
+**Decisão:** a retomada aceita somente um commit filho direto do head registrado, com mensagem e autoria do controller, worktree limpa, arquivos confinados aos caminhos permitidos, workflow e execução concluídos e artefatos íntegros. Ela reconstrói a linha da iteração e o head sem executar o agente novamente. Qualquer divergência permanece bloqueada.
+
+**Efeito:** uma falha entre captura e persistência é recuperável. Resultados externos incertos e commits não atribuíveis ao controller continuam exigindo inspeção humana.
+
+## ADR-016: Manifesto documental por versão metodológica
+
+**Estado:** implementado em 2026-10-18.
+
+**Contexto:** a Fase 5 produz três tipos de relatório, mas a métrica de completude não podia inferir quais eram obrigatórios para uma metodologia.
+
+**Decisão:** `MethodologyVersion.required_documents` declara um subconjunto dos tipos documentais existentes. A observação conta apenas registros válidos com conteúdo e artefato íntegros vinculados à execução. Uma versão sem manifesto mantém a métrica indisponível, sem transformar ausência de requisito em zero.
+
+**Efeito:** versões antigas continuam legíveis. Versões com manifesto produzem numerador e denominador determinísticos; o manifesto é herdado por uma versão candidata.
+
+## ADR-017: Coordenação local de execuções entre managers
+
+**Estado:** implementado em 2026-10-18; atualiza o limite operacional das ADR-008 e ADR-010.
+
+**Contexto:** travas em memória não impediam que dois managers executassem no mesmo workspace, e um manager novo podia marcar como interrompido um turno ainda ativo no outro.
+
+**Decisão:** cada execução mantém uma trava POSIX de arquivo até a persistência do resultado; cada workspace tem outra trava durante a chamada ao adapter. A reconciliação marca `INTERRUPTED` somente quando consegue adquirir a trava da execução. As travas ficam ao lado do SQLite e permitem paralelismo entre workspaces distintos. O controller adversarial cria worktrees; o manager genérico recebe um diretório já existente.
+
+**Efeito:** managers no mesmo sistema de arquivos local não executam simultaneamente no mesmo workspace nem interrompem um turno com dono ativo. O scheduler de workflow e o controller adversarial não ganharam coordenação entre processos; cada run ainda requer um único scheduler ativo. Não há garantia de lock em armazenamento remoto ou Windows.
+
+## ADR-018: Seleção de versões publicadas pelo controller adversarial
+
+**Estado:** implementado em 2026-10-18.
+
+**Contexto:** o Registry publicava `dev-adversarial@1.1.0`, mas o controller especializado continuava a executar sempre `1.0.0`, sem garantir que um gate proposto antes do QA fosse aplicado.
+
+**Decisão:** o controller aceita uma versão publicada explicitamente selecionada somente quando a definição tem a topologia que ele implementa. Validadores declarados como dependências do QA rodam no snapshot antes da revisão, com resultados persistidos e mensagens ACP. A criação da execução grava o vínculo de versão na mesma transação. Execuções legadas sem seleção continuam em `1.0.0`; uma execução vinculada não aceita retomada por um controller configurado para outra versão.
+
+**Efeito:** versões compatíveis podem ser adotadas após publicação supervisionada, sem mudar execuções antigas. Definições de outras topologias exigem outro controller ou o Workflow Engine genérico.
+
+## ADR-019: Posse local por execução de workflow
+
+**Estado:** implementado em 2026-10-18; complementa ADR-017.
+
+**Contexto:** mesmo com execuções de agentes protegidas, dois motores podiam tentar recuperar ou avançar o mesmo workflow simultaneamente. Um segundo motor podia marcar como incerto um passo ainda ativo no primeiro.
+
+**Decisão:** `WorkflowEngine.run()` mantém uma trava local por run durante o agendamento; `recover()` externo apenas lê enquanto a trava está ocupada. `AdversarialLoop.run()` mantém outra trava por execução de engenharia. Cancelamento vindo de outra instância durante a execução é recusado porque o adapter ativo pertence ao processo dono.
+
+**Efeito:** uma segunda instância espera e não repete agentes. A coordenação depende de travas POSIX no mesmo sistema de arquivos e não fornece agendamento distribuído nem cancelamento remoto.
+
+## ADR-020: Criação atômica de workflow metodológico
+
+**Estado:** implementado em 2026-10-18.
+
+**Contexto:** `WorkflowEngine.create_published()` criava um workflow e só depois gravava o vínculo com a versão publicada. Uma falha no segundo passo deixava uma execução sem versão metodológica registrada.
+
+**Decisão:** o repositório de workflows grava o vínculo opcional na mesma transação SQLite que cria o run, seus passos e o evento inicial. O motor só passa esse vínculo depois de consultar uma versão publicada no Registry do mesmo banco.
+
+**Efeito:** falha na gravação do vínculo desfaz a criação inteira. A execução já iniciada continua presa à definição e ao hash selecionados.
+
+## ADR-021: Admissão explícita de projetos confiáveis
+
+**Estado:** implementado em 2026-10-18.
+
+**Contexto:** a execução de Codex CLI ou command gates em um checkout externo pode rodar código do projeto no host. As travas e o sandbox solicitado à CLI não isolam todas as operações do sistema operacional.
+
+**Decisão:** o operador fornece uma `ExecutionPolicy` com raízes locais específicas e confiáveis. Manager, adapter, controlador adversarial e gates conferem o caminho resolvido antes de executar. Raízes genéricas ou sensíveis são recusadas. A política não confere autoridade a agentes nem substitui isolamento de sistema operacional.
+
+**Efeito:** callers precisam fornecer a política explicitamente. Projetos desconhecidos ficam bloqueados. O AEC continua limitado a execução local supervisionada em projetos confiáveis; a política não protege contra código hostil dentro do próprio processo Python.
+
+## ADR-022: Benchmark local executado e procedência da evidência
+
+**Estado:** implementado em 2026-10-18.
+
+**Contexto:** a comparação original aceitava números de um callback, úteis para fixtures, mas insuficientes para afirmar melhoria observada.
+
+**Decisão:** um runner executa as definições base e candidata com Workflow Engine e SQLite separados por tarefa, repetição e versão. Critérios e condições são comparados por hash; resultados e caminhos dos bancos são gravados na avaliação. O contrato distingue `FIXTURE` de `EXECUTED`. O runner inicial usa adapter roteirizado, tarefas de tipagem e métricas diretamente observáveis. Revisões e retrabalho permanecem indisponíveis nele.
+
+**Efeito:** o resultado executado pode detectar regressão de aceite e apoiar uma decisão humana exploratória. Não há inferência causal nem benchmark de desempenho de Codex. Avaliações `FIXTURE` não autorizam aprovação ou publicação; avaliações executadas continuam exigindo aprovação humana.
+
+## ADR-023: Verificação local entre processos
+
+**Estado:** verificado em 2026-10-18.
+
+**Contexto:** testes em um processo não demonstravam a coordenação prevista nas ADR-017 e ADR-019.
+
+**Decisão:** a suíte inicia processos Python independentes com `spawn`, SQLite compartilhado, concorrência de ACP, manager, workflow e publicação, além de saída abrupta após resultado conhecido e desconhecido. O segundo processo deve consumir mensagens pendentes e recuperar resultados persistidos sem duplicar efeitos. Resultado externo desconhecido permanece `INTERRUPTED`.
+
+**Efeito:** a garantia foi verificada no sistema de arquivos local POSIX usado nos testes. Isso não constitui teste distribuído, de armazenamento remoto ou de isolamento contra código não confiável.

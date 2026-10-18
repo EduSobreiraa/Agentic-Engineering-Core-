@@ -25,7 +25,9 @@ from aec.engineering.models import QAReviewResult
 from aec.security.identities import Identity, Role
 
 from .base import ExecutionAdapter
+from .locking import held
 from .models import AgentSession, ExecutionRequest, ExecutionResult, ExecutionStatus
+from .policy import ExecutionPolicy
 from .repository import ExecutionRepository
 
 
@@ -36,6 +38,7 @@ class ExecutionManager:
         adapters: dict[str, ExecutionAdapter],
         allowed_roots: list[Path],
         *,
+        policy: ExecutionPolicy,
         max_concurrency: int = 2,
         writable_agents: frozenset[str] = frozenset(),
     ) -> None:
@@ -44,6 +47,7 @@ class ExecutionManager:
         self.broker = broker
         self.adapters = adapters
         self.allowed_roots = [root.resolve(strict=True) for root in allowed_roots]
+        self.policy = policy
         self.writable_agents = writable_agents
         forbidden = {
             Path("/"),
@@ -102,6 +106,7 @@ class ExecutionManager:
             for root in self.allowed_roots
         ):
             raise PermissionError("working directory is outside allowed roots")
+        self.policy.require(request.working_directory)
         return source
 
     async def execute(
@@ -111,6 +116,18 @@ class ExecutionManager:
         source_message_id: str,
     ) -> ExecutionResult:
         source = self._authorize(request, identity, source_message_id)
+        async with held(self.broker.db.path, f"execution:{request.execution_id}"):
+            return await self._execute_authorized(
+                request, identity, source_message_id, source
+            )
+
+    async def _execute_authorized(
+        self,
+        request: ExecutionRequest,
+        identity: Identity,
+        source_message_id: str,
+        source: Message,
+    ) -> ExecutionResult:
         adapter = self.adapters.get(request.executor)
         if adapter is None:
             raise ValueError("executor is not registered")
@@ -140,7 +157,11 @@ class ExecutionManager:
         workspace_lock = self._workspaces.setdefault(
             request.working_directory, asyncio.Lock()
         )
-        async with self._slots, workspace_lock:
+        async with (
+            self._slots,
+            workspace_lock,
+            held(self.broker.db.path, f"workspace:{request.working_directory}"),
+        ):
             self.repository.status(request.execution_id, ExecutionStatus.STARTING)
             try:
                 if not await adapter.healthcheck():

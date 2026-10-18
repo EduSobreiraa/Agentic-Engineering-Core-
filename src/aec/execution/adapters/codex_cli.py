@@ -12,11 +12,15 @@ from datetime import datetime, timezone
 
 from aec.execution.base import ExecutionAdapter
 from aec.execution.models import ExecutionRequest, ExecutionResult, ExecutionStatus
+from aec.execution.policy import ExecutionPolicy
 
 
 class CodexCliAdapter(ExecutionAdapter):
-    def __init__(self, executable: str | None = None) -> None:
+    def __init__(
+        self, executable: str | None = None, *, policy: ExecutionPolicy
+    ) -> None:
         self.executable = executable or shutil.which("codex")
+        self.policy = policy
         self._running: dict[str, asyncio.subprocess.Process] = {}
         self._cancelled: set[str] = set()
 
@@ -108,11 +112,19 @@ class CodexCliAdapter(ExecutionAdapter):
         started = datetime.now(timezone.utc)
         if self.executable is None:
             raise FileNotFoundError("Codex CLI is not installed")
-        args = [self.executable, "exec", "--json", "--sandbox", request.sandbox_mode]
+        self.policy.require(request.working_directory)
+        args = [
+            self.executable,
+            "exec",
+            "--json",
+            "--sandbox",
+            request.sandbox_mode,
+            "--skip-git-repo-check",
+        ]
         if provider_session_id:
             args.extend(["resume", provider_session_id, "-"])
         else:
-            args.extend(["--skip-git-repo-check", "-"])
+            args.append("-")
         process = await asyncio.create_subprocess_exec(
             *args,
             cwd=request.working_directory,

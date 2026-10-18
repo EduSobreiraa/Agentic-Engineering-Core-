@@ -6,7 +6,7 @@ import asyncio
 import re
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
 from uuid import uuid4
 
 from aec.communication.broker import Broker
@@ -18,9 +18,13 @@ from aec.communication.schemas import (
     TaskFailed,
     ValidationResult,
 )
+from aec.execution.locking import LocalLock, held
 from aec.execution.manager import ExecutionManager
 from aec.execution.models import ExecutionRequest, ExecutionResult, ExecutionStatus
 from aec.security.identities import Identity, Role
+
+if TYPE_CHECKING:
+    from aec.methodology.governance import MethodologyRegistry
 
 from .loader import validate
 from .models import (
@@ -79,6 +83,14 @@ class WorkflowEngine:
     def create(
         self, definition: WorkflowDefinition, run_id: str | None = None
     ) -> WorkflowRun:
+        return self._create(definition, run_id, None)
+
+    def _create(
+        self,
+        definition: WorkflowDefinition,
+        run_id: str | None,
+        binding: tuple[str, str, str] | None,
+    ) -> WorkflowRun:
         validate(definition)
         for step in definition.steps:
             if step.type == "agent" and (
@@ -95,9 +107,31 @@ class WorkflowEngine:
                     raise ValueError("QA needs read-only mode and artifact_id")
             if step.type == "validation" and step.validator not in self.validators:
                 raise ValueError("validator is not registered")
-        run = self.repository.create(run_id or str(uuid4()), definition)
+        run = self.repository.create(run_id or str(uuid4()), definition, binding)
         self.repository.workflow_status(run.run_id, WorkflowStatus.VALIDATED)
         return self.repository.get_run(run.run_id)
+
+    def create_published(
+        self,
+        registry: MethodologyRegistry,
+        methodology_id: str,
+        version: str,
+        run_id: str | None = None,
+    ) -> WorkflowRun:
+        if Path(registry.db.path).resolve() != Path(self.broker.db.path).resolve():
+            raise ValueError("registry and workflow must share a database")
+        definition = registry.get(methodology_id, version).definition
+        with self.broker.db.connect() as db:
+            row = db.execute(
+                "SELECT sha256 FROM methodology_versions "
+                "WHERE methodology_id=? AND version=?",
+                (methodology_id, version),
+            ).fetchone()
+        if row is None:
+            raise KeyError((methodology_id, version))
+        return self._create(
+            definition, run_id, (methodology_id, version, str(row["sha256"]))
+        )
 
     def _ready(
         self, definition: WorkflowDefinition, steps: dict[str, StepRun]
@@ -384,13 +418,19 @@ class WorkflowEngine:
     async def run(self, run_id: str) -> WorkflowRun:
         if run_id in self._active:
             raise RuntimeError("workflow is already running in this process")
+        async with held(self.broker.db.path, f"workflow:{run_id}"):
+            return await self._run_owned(run_id)
+
+    async def _run_owned(self, run_id: str) -> WorkflowRun:
+        if run_id in self._active:
+            raise RuntimeError("workflow is already running in this process")
         self._active.add(run_id)
         task = asyncio.current_task()
         if task is not None:
             self._tasks[run_id] = task
         try:
             definition = self.repository.definition(run_id)
-            run = self.recover(run_id)
+            run = self._recover(run_id)
             if run.status == WorkflowStatus.VALIDATED:
                 self.repository.workflow_status(run_id, WorkflowStatus.RUNNING)
             elif run.status not in {
@@ -485,6 +525,15 @@ class WorkflowEngine:
         return self.repository.get_run(run_id)
 
     def recover(self, run_id: str) -> WorkflowRun:
+        lock = LocalLock(self.broker.db.path, f"workflow:{run_id}")
+        try:
+            if not lock.try_acquire():
+                return self.repository.get_run(run_id)
+            return self._recover(run_id)
+        finally:
+            lock.close()
+
+    def _recover(self, run_id: str) -> WorkflowRun:
         run = self.repository.get_run(run_id)
         if run.status == WorkflowStatus.FAILED:
             self._publish_failure(run_id)
@@ -555,6 +604,17 @@ class WorkflowEngine:
         return self.repository.get_run(run_id)
 
     def cancel(self, run_id: str) -> WorkflowRun:
+        if run_id in self._active:
+            return self._cancel_owned(run_id)
+        lock = LocalLock(self.broker.db.path, f"workflow:{run_id}")
+        try:
+            if not lock.try_acquire():
+                raise RuntimeError("workflow is active in another engine")
+            return self._cancel_owned(run_id)
+        finally:
+            lock.close()
+
+    def _cancel_owned(self, run_id: str) -> WorkflowRun:
         run = self.repository.get_run(run_id)
         if run.status not in {
             WorkflowStatus.CREATED,

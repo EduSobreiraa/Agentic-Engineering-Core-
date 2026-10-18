@@ -1,4 +1,5 @@
 import asyncio
+import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
@@ -9,6 +10,9 @@ from aec.communication.broker import Broker
 from aec.execution.base import ExecutionAdapter
 from aec.execution.manager import ExecutionManager
 from aec.execution.models import ExecutionRequest, ExecutionResult, ExecutionStatus
+from aec.execution.policy import ExecutionPolicy
+from aec.methodology.contracts import MethodologyVersion
+from aec.methodology.governance import MethodologyRegistry
 from aec.security.identities import Role
 from aec.workflows.engine import TransientValidationError, WorkflowEngine
 from aec.workflows.loader import WorkflowDefinitionError, load, validate
@@ -50,7 +54,9 @@ def setup_engine(tmp_path: Path) -> tuple[WorkflowEngine, SimulatedAdapter]:
     }
     quality_gate = broker.register("quality-gate", Role.QUALITY_GATE)
     adapter = SimulatedAdapter()
-    manager = ExecutionManager(broker, {"simulated": adapter}, [tmp_path])
+    manager = ExecutionManager(
+        broker, {"simulated": adapter}, [tmp_path], policy=ExecutionPolicy((tmp_path,))
+    )
     engine = WorkflowEngine(
         broker,
         manager,
@@ -66,6 +72,42 @@ def setup_engine(tmp_path: Path) -> tuple[WorkflowEngine, SimulatedAdapter]:
 
 def example() -> WorkflowDefinition:
     return load(Path(__file__).parents[2] / "docs/workflows/example.yaml")
+
+
+def test_create_from_published_methodology(tmp_path: Path) -> None:
+    engine, _ = setup_engine(tmp_path)
+    definition = example()
+    registry = MethodologyRegistry(
+        engine.broker.db, validators=frozenset({"artifact-check"})
+    )
+    registry.seed(
+        MethodologyVersion(
+            methodology_id=definition.id,
+            version=definition.version,
+            definition=definition,
+            mandatory_gates=frozenset({"artifact-check"}),
+        ),
+        actor="bootstrap",
+    )
+    run = engine.create_published(registry, definition.id, definition.version)
+    with engine.broker.db.connect() as connection:
+        binding = connection.execute(
+            "SELECT version FROM methodology_run_bindings WHERE run_id=?",
+            (run.run_id,),
+        ).fetchone()
+    assert binding["version"] == "1.0.0"
+    with engine.broker.db.connect() as connection:
+        connection.execute(
+            "CREATE TRIGGER reject_methodology_binding "
+            "BEFORE INSERT ON methodology_run_bindings "
+            "BEGIN SELECT RAISE(ABORT, 'binding failed'); END"
+        )
+    with pytest.raises(sqlite3.IntegrityError, match="binding failed"):
+        engine.create_published(
+            registry, definition.id, definition.version, run_id="rolled-back"
+        )
+    with pytest.raises(KeyError):
+        engine.repository.get_run("rolled-back")
 
 
 def test_complete_persisted_workflow_and_recovery(tmp_path: Path) -> None:
@@ -99,6 +141,50 @@ def test_complete_persisted_workflow_and_recovery(tmp_path: Path) -> None:
         restarted.decide(run.run_id, "approval", "supervisor", True)
     assert len(restarted.repository.events(run.run_id)) >= 15
     assert restarted.repository.definition(run.run_id) == example()
+
+
+def test_second_engine_waits_for_same_workflow(tmp_path: Path) -> None:
+    class HoldingAdapter(SimulatedAdapter):
+        def __init__(self) -> None:
+            super().__init__()
+            self.started = asyncio.Event()
+            self.release = asyncio.Event()
+
+        async def execute(
+            self, request: ExecutionRequest, provider_session_id: str | None = None
+        ) -> ExecutionResult:
+            if not self.prompts:
+                self.started.set()
+                await self.release.wait()
+            return await super().execute(request, provider_session_id)
+
+    engine, _ = setup_engine(tmp_path)
+    adapter = HoldingAdapter()
+    engine.manager.adapters["simulated"] = adapter
+    run = engine.create(example())
+
+    async def scenario() -> None:
+        first = asyncio.create_task(engine.run(run.run_id))
+        await adapter.started.wait()
+        second_engine, _ = setup_engine(tmp_path)
+        second_engine.manager.adapters["simulated"] = adapter
+        second = asyncio.create_task(second_engine.run(run.run_id))
+        await asyncio.sleep(0.05)
+        assert (
+            second_engine.repository.get_run(run.run_id).status
+            == WorkflowStatus.RUNNING
+        )
+        with pytest.raises(RuntimeError, match="another engine"):
+            second_engine.cancel(run.run_id)
+        adapter.release.set()
+        results = await asyncio.gather(first, second)
+        assert [result.status for result in results] == [
+            WorkflowStatus.WAITING_APPROVAL,
+            WorkflowStatus.WAITING_APPROVAL,
+        ]
+
+    asyncio.run(scenario())
+    assert len(adapter.prompts) == 2
 
 
 def test_rejection_and_unknown_execution(tmp_path: Path) -> None:
@@ -158,7 +244,12 @@ def test_malformed_yaml_and_skipped_approval(tmp_path: Path) -> None:
         name: broker.register(name, Role.IMPLEMENTER)
         for name in ("analyst", "implementer")
     }
-    manager = ExecutionManager(broker, {"simulated": SimulatedAdapter()}, [tmp_path])
+    manager = ExecutionManager(
+        broker,
+        {"simulated": SimulatedAdapter()},
+        [tmp_path],
+        policy=ExecutionPolicy((tmp_path,)),
+    )
     engine = WorkflowEngine(
         broker,
         manager,
@@ -202,7 +293,11 @@ def test_parallel_limit_and_safe_validation_retry(tmp_path: Path) -> None:
         path.mkdir()
     adapter = ConcurrentAdapter()
     manager = ExecutionManager(
-        broker, {"simulated": adapter}, [tmp_path], max_concurrency=2
+        broker,
+        {"simulated": adapter},
+        [tmp_path],
+        policy=ExecutionPolicy((tmp_path,)),
+        max_concurrency=2,
     )
     attempts = 0
 
@@ -273,7 +368,12 @@ def test_cancel_running_agent(tmp_path: Path) -> None:
     orchestrator = broker.register("orchestrator", Role.ORCHESTRATOR)
     gate = broker.register("quality-gate", Role.QUALITY_GATE)
     analyst = broker.register("analyst", Role.IMPLEMENTER)
-    manager = ExecutionManager(broker, {"simulated": SlowAdapter()}, [tmp_path])
+    manager = ExecutionManager(
+        broker,
+        {"simulated": SlowAdapter()},
+        [tmp_path],
+        policy=ExecutionPolicy((tmp_path,)),
+    )
     engine = WorkflowEngine(
         broker, manager, orchestrator, {"analyst": analyst}, gate, tmp_path, {}
     )
@@ -337,7 +437,12 @@ def test_skips_propagate_in_topological_order(tmp_path: Path) -> None:
     broker = Broker(tmp_path / "aec.sqlite")
     orchestrator = broker.register("orchestrator", Role.ORCHESTRATOR)
     gate = broker.register("quality-gate", Role.QUALITY_GATE)
-    manager = ExecutionManager(broker, {"simulated": SimulatedAdapter()}, [tmp_path])
+    manager = ExecutionManager(
+        broker,
+        {"simulated": SimulatedAdapter()},
+        [tmp_path],
+        policy=ExecutionPolicy((tmp_path,)),
+    )
     engine = WorkflowEngine(
         broker,
         manager,
@@ -415,7 +520,12 @@ def test_workflow_timeout_cancels_active_execution(tmp_path: Path) -> None:
     orchestrator = broker.register("orchestrator", Role.ORCHESTRATOR)
     gate = broker.register("quality-gate", Role.QUALITY_GATE)
     analyst = broker.register("analyst", Role.IMPLEMENTER)
-    manager = ExecutionManager(broker, {"simulated": SlowAdapter()}, [tmp_path])
+    manager = ExecutionManager(
+        broker,
+        {"simulated": SlowAdapter()},
+        [tmp_path],
+        policy=ExecutionPolicy((tmp_path,)),
+    )
     engine = WorkflowEngine(
         broker, manager, orchestrator, {"analyst": analyst}, gate, tmp_path, {}
     )
@@ -448,7 +558,12 @@ def test_permanent_validator_error_does_not_retry(tmp_path: Path) -> None:
     broker = Broker(tmp_path / "aec.sqlite")
     orchestrator = broker.register("orchestrator", Role.ORCHESTRATOR)
     gate = broker.register("quality-gate", Role.QUALITY_GATE)
-    manager = ExecutionManager(broker, {"simulated": SimulatedAdapter()}, [tmp_path])
+    manager = ExecutionManager(
+        broker,
+        {"simulated": SimulatedAdapter()},
+        [tmp_path],
+        policy=ExecutionPolicy((tmp_path,)),
+    )
     attempts = 0
 
     def invalid(_: dict[str, str]) -> bool:
