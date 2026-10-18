@@ -111,3 +111,13 @@ Estas decisões foram aceitas no escopo inicial. Mudanças futuras devem acresce
 **Decisão:** `human_approval` grava pedido e suspende o workflow. Uma chamada Python `decide()` exige que o identificador do ator conste de `local_approvers` e registra aprovação ou rejeição. Condições comparam apenas o booleano `passed` de uma validação registrada; texto livre não altera a política.
 
 **Efeito:** aprovação e eventos ficam auditáveis no SQLite. A lista de atores é uma autorização local fornecida pelo código confiável, sem prova criptográfica de identidade; a aplicação deve permanecer em ambiente local supervisionado.
+
+## ADR-012: Ciclo adversarial como metodologia especializada
+
+**Estado:** aceito em 2026-10-18.
+
+**Contexto:** o Workflow Engine da Fase 3 exige DAGs acíclicos, mas a metodologia adversarial precisa repetir Implementador e QA com limite e persistência.
+
+**Decisão:** `AdversarialLoop` persiste a iteração e executa cada papel por um workflow `dev-adversarial@1.0.0` separado. O Execution Manager continua sendo a única ponte com adapters. Commits e worktrees locais são capturados pelo núcleo; o QA revisa snapshot separado. Gates são comandos registrados pelo projeto, e o pedido de aprovação usa o passo humano da Fase 3. Critérios, limite e configuração de gates são fixados na execução.
+
+**Efeito:** outros workflows não precisam seguir essa metodologia. Worktrees não são isolamento de segurança em nível de sistema operacional. Resultado externo incerto bloqueia retomada automática; não há merge ou push automático. A integração real com dois Codex e recuperação de commits capturados imediatamente antes de falha SQLite exigem verificação posterior.

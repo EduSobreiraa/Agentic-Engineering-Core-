@@ -1,6 +1,6 @@
 # Componentes e responsabilidades
 
-Este documento descreve os contratos desejados. Nenhum componente abaixo tem implementação funcional na Fase 0.
+Este documento descreve os limites dos componentes. ACP, Execution Layer, Workflow Engine, aprovação local e ciclo adversarial simulado possuem implementação; o Control Plane geral e a governança distribuída ainda são alvo futuro.
 
 | Componente | Responsabilidade | Entrada e saída esperadas | Fora de sua autoridade |
 | --- | --- | --- | --- |
@@ -14,8 +14,8 @@ Este documento descreve os contratos desejados. Nenhum componente abaixo tem imp
 
 ## Papéis de agentes
 
-O Orquestrador planeja e acompanha uma execução dentro das permissões do sistema. O Implementador produz código e correções em ambiente autorizado. O QA adversarial aponta falhas com evidências e não altera silenciosamente o objeto analisado. O Worker de Documentação registra decisões, relatórios e vínculos com evidências. O Worker de Metodologia compara execuções e escreve RFCs; só uma aprovação humana permite publicar nova versão. Esses papéis são contratos de responsabilidade, não classes nem processos implementados hoje.
+O Orquestrador acompanha uma execução dentro das permissões do sistema. O Implementador produz código e correções em worktree autorizada. O QA adversarial aponta falhas com evidências em snapshot separado. Esses três papéis são usados pelo ciclo da Fase 4. O Worker de Documentação e o Worker de Metodologia permanecem planejados; só uma aprovação humana permite publicar nova metodologia.
 
 ## Dependências entre componentes
 
-O ACP depende apenas de seus contratos e da persistência local. A Execution Layer implementará uma interface de executor; Codex CLI será o primeiro adapter, e Ollama poderá ser adicionado depois. O Methodology Engine usa ACP e Control Plane para coordenar passos, sem acoplar definições de workflow a um provedor. A Governance Layer e o Quality Gate devolvem decisões ao Control Plane por interfaces explícitas. A Fase 1 definirá as interfaces concretas necessárias ao ACP, sem criar módulos vazios para os demais componentes.
+O ACP depende apenas de seus contratos e da persistência local. A Execution Layer implementa uma interface de executor com Codex CLI como primeiro adapter. O Workflow Engine coordena DAGs; `AdversarialLoop` persiste iterações e reutiliza seus passos. A aprovação humana usa a infraestrutura local do Workflow Engine. Os gates da Fase 4 usam comandos registrados pelo projeto. Ollama e seleção geral de metodologias permanecem futuras.
