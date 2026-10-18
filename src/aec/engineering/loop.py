@@ -23,6 +23,7 @@ from aec.communication.schemas import (
 )
 from aec.execution.manager import ExecutionManager
 from aec.execution.models import ExecutionResult
+from aec.methodology.governance import MethodologyRegistry
 from aec.security.identities import Identity, Role
 from aec.workflows.engine import WorkflowEngine
 from aec.workflows.models import WorkflowDefinition, WorkflowStatus
@@ -49,6 +50,7 @@ class AdversarialLoop:
         max_iterations: int = 3,
         max_duration_seconds: float = 1800,
         local_approvers: frozenset[str] = frozenset(),
+        methodology_version: str | None = None,
     ) -> None:
         for identity, role in (
             (orchestrator, Role.ORCHESTRATOR),
@@ -85,6 +87,46 @@ class AdversarialLoop:
         self.max_iterations = max_iterations
         self.max_duration_seconds = max_duration_seconds
         self.local_approvers = local_approvers
+        self.methodology_version = methodology_version
+        self.pre_qa_gate_ids: frozenset[str] = frozenset()
+        if methodology_version is not None:
+            published = MethodologyRegistry(broker.db).get(
+                "dev-adversarial", methodology_version
+            )
+            steps = {step.id: step for step in published.definition.steps}
+            if set(steps) - {"implement", "qa", "approval"} - {
+                gate.gate_id for gate in gates
+            }:
+                raise ValueError("published methodology has unsupported steps")
+            implement = steps.get("implement")
+            qa_step = steps.get("qa")
+            approval = steps.get("approval")
+            if (
+                implement is None
+                or implement.type != "agent"
+                or implement.agent != "implementer"
+                or implement.depends_on
+                or qa_step is None
+                or qa_step.type != "agent"
+                or qa_step.agent != "qa"
+                or approval is None
+                or approval.type != "human_approval"
+                or approval.depends_on != ["qa"]
+                or "implement" not in qa_step.depends_on
+            ):
+                raise ValueError("published methodology is not an adversarial loop")
+            pre_ids = set(qa_step.depends_on) - {"implement"}
+            if any(
+                gate_id not in steps
+                or steps[gate_id].type != "validation"
+                or steps[gate_id].validator != gate_id
+                or steps[gate_id].depends_on != ["implement"]
+                for gate_id in pre_ids
+            ) or set(steps) != {"implement", "qa", "approval"} | pre_ids:
+                raise ValueError("published methodology has unsupported gate order")
+            if not pre_ids <= {gate.gate_id for gate in gates}:
+                raise ValueError("published methodology requires unconfigured gate")
+            self.pre_qa_gate_ids = frozenset(pre_ids)
         self._active: set[str] = set()
 
     def _row(self, run_id: str) -> dict[str, str | int]:
@@ -94,6 +136,13 @@ class AdversarialLoop:
             ).fetchone()
         if row is None:
             raise KeyError(run_id)
+        with self.broker.db.connect() as db:
+            binding = db.execute(
+                "SELECT version FROM methodology_run_bindings WHERE run_id=?",
+                (run_id,),
+            ).fetchone()
+        if (binding["version"] if binding else None) != self.methodology_version:
+            raise ValueError("engineering run uses another methodology version")
         return dict(row)
 
     def _iteration(self, run_id: str, number: int) -> dict[str, str | int | None]:
@@ -154,6 +203,23 @@ class AdversarialLoop:
                 "VALUES (?,1,'PREPARED')",
                 (identifier,),
             )
+            if self.methodology_version is not None:
+                published = db.execute(
+                    "SELECT sha256 FROM methodology_versions "
+                    "WHERE methodology_id='dev-adversarial' AND version=?",
+                    (self.methodology_version,),
+                ).fetchone()
+                if published is None:
+                    raise ValueError("selected methodology is no longer published")
+                db.execute(
+                    "INSERT INTO methodology_run_bindings VALUES (?,?,?,?)",
+                    (
+                        identifier,
+                        "dev-adversarial",
+                        self.methodology_version,
+                        published["sha256"],
+                    ),
+                )
         return identifier
 
     def _engine(
@@ -191,7 +257,7 @@ class AdversarialLoop:
         definition = WorkflowDefinition.model_validate(
             {
                 "id": "dev-adversarial",
-                "version": "1.0.0",
+                "version": self.methodology_version or "1.0.0",
                 "name": "Adversarial Engineering Loop",
                 "metadata": {
                     "task_id": str(self._row(run_id)["task_id"]),
@@ -471,6 +537,37 @@ class AdversarialLoop:
                         snapshot
                     ) != implementation.result_commit or changed_files(snapshot):
                         raise RuntimeError("QA snapshot is not stable")
+                    if self.pre_qa_gate_ids:
+                        if current["gates"] is None:
+                            pre_gates = run_gates(
+                                snapshot,
+                                implementation.result_commit,
+                                tuple(
+                                    gate
+                                    for gate in self.gates
+                                    if gate.gate_id in self.pre_qa_gate_ids
+                                ),
+                            )
+                            self._publish_gates(
+                                run_id,
+                                number,
+                                str(row["task_id"]),
+                                implementation.result_commit,
+                                pre_gates,
+                            )
+                            self._save(run_id, number, "IMPLEMENTED", gates=pre_gates)
+                            continue
+                        pre_gates = [
+                            GateResult.model_validate_json(json.dumps(item))
+                            for item in json.loads(str(current["gates"]))
+                        ]
+                        if (
+                            not self.pre_qa_gate_ids
+                            <= {gate.gate_id for gate in pre_gates}
+                            or any(gate.status != "PASSED" for gate in pre_gates)
+                        ):
+                            self._block(run_id, "pre-QA methodology gate failed")
+                            return "BLOCKED"
                     diff = git(
                         worktree,
                         "diff",
@@ -545,34 +642,28 @@ class AdversarialLoop:
                     )
                     review = QAReviewResult.model_validate_json(str(current["review"]))
                     snapshot = self.worktree_root / f"{run_id}-qa-{number}"
-                    gates = run_gates(snapshot, review.reviewed_commit, self.gates)
-                    for gate in gates:
-                        message_id = f"gate:{run_id}:{number}:{gate.gate_id}"
-                        if self.broker.get_message(message_id) is None:
-                            self.broker.publish(
-                                Message(
-                                    protocol="ACP",
-                                    version="0.1",
-                                    message_id=message_id,
-                                    run_id=run_id,
-                                    task_id=str(row["task_id"]),
-                                    sender=self.quality_gate.agent_id,
-                                    recipient=self.orchestrator.agent_id,
-                                    type=MessageType.VALIDATION_RESULT,
-                                    iteration=number,
-                                    created_at=gate.timestamp,
-                                    payload=ValidationResult(
-                                        artifact_id=review.reviewed_commit,
-                                        passed=gate.status == "PASSED",
-                                        evidence=f"{gate.gate_id}: {gate.evidence}",
-                                    ),
-                                    metadata={
-                                        "gate_id": gate.gate_id,
-                                        "reviewed_commit": review.reviewed_commit,
-                                    },
-                                ),
-                                self.quality_gate,
-                            )
+                    gates = run_gates(
+                        snapshot,
+                        review.reviewed_commit,
+                        tuple(
+                            gate
+                            for gate in self.gates
+                            if gate.gate_id not in self.pre_qa_gate_ids
+                        ),
+                    )
+                    if self.pre_qa_gate_ids:
+                        gates = [
+                            GateResult.model_validate_json(json.dumps(item))
+                            for item in json.loads(str(current["gates"]))
+                            if item["gate_id"] != "snapshot-integrity"
+                        ] + gates
+                    self._publish_gates(
+                        run_id,
+                        number,
+                        str(row["task_id"]),
+                        review.reviewed_commit,
+                        gates,
+                    )
                     self._save(run_id, number, "GATED", gates=gates)
                     continue
                 if current["status"] == "GATED":
@@ -630,6 +721,40 @@ class AdversarialLoop:
                 self._block(run_id, f"{type(exc).__name__}: {exc}")
                 return "BLOCKED"
 
+    def _publish_gates(
+        self,
+        run_id: str,
+        number: int,
+        task_id: str,
+        commit: str,
+        gates: list[GateResult],
+    ) -> None:
+        for gate in gates:
+            message_id = f"gate:{run_id}:{number}:{gate.gate_id}"
+            if self.broker.get_message(message_id) is not None:
+                continue
+            self.broker.publish(
+                Message(
+                    protocol="ACP",
+                    version="0.1",
+                    message_id=message_id,
+                    run_id=run_id,
+                    task_id=task_id,
+                    sender=self.quality_gate.agent_id,
+                    recipient=self.orchestrator.agent_id,
+                    type=MessageType.VALIDATION_RESULT,
+                    iteration=number,
+                    created_at=gate.timestamp,
+                    payload=ValidationResult(
+                        artifact_id=commit,
+                        passed=gate.status == "PASSED",
+                        evidence=f"{gate.gate_id}: {gate.evidence}",
+                    ),
+                    metadata={"gate_id": gate.gate_id, "reviewed_commit": commit},
+                ),
+                self.quality_gate,
+            )
+
     def _rework(
         self,
         run_id: str,
@@ -684,7 +809,7 @@ class AdversarialLoop:
         definition = WorkflowDefinition.model_validate(
             {
                 "id": "dev-adversarial",
-                "version": "1.0.0",
+                "version": self.methodology_version or "1.0.0",
                 "name": "Adversarial Engineering Loop",
                 "steps": [{"id": "approval", "type": "human_approval"}],
             }

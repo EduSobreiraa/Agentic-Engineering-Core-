@@ -13,7 +13,10 @@ from aec.engineering.loop import AdversarialLoop
 from aec.execution.base import ExecutionAdapter
 from aec.execution.manager import ExecutionManager
 from aec.execution.models import ExecutionRequest, ExecutionResult, ExecutionStatus
+from aec.methodology.contracts import MethodologyVersion
+from aec.methodology.governance import MethodologyRegistry
 from aec.security.identities import Role
+from aec.workflows.models import WorkflowDefinition
 
 
 def git(path: Path, *args: str) -> None:
@@ -183,6 +186,104 @@ def setup(
         local_approvers=frozenset({"supervisor"}),
     )
     return loop, adapter
+
+
+def setup_published(
+    tmp_path: Path, type_check_passes: bool = True
+) -> tuple[AdversarialLoop, SimulatedAgents]:
+    baseline, adapter = setup(tmp_path)
+    definition = WorkflowDefinition.model_validate(
+        {
+            "id": "dev-adversarial",
+            "version": "1.1.0",
+            "name": "Adversarial with type check",
+            "steps": [
+                {
+                    "id": "implement",
+                    "type": "agent",
+                    "agent": "implementer",
+                    "executor": "simulated",
+                    "inputs": {"prompt": "implement"},
+                },
+                {
+                    "id": "type_check",
+                    "type": "validation",
+                    "validator": "type_check",
+                    "depends_on": ["implement"],
+                },
+                {
+                    "id": "qa",
+                    "type": "agent",
+                    "agent": "qa",
+                    "executor": "simulated",
+                    "depends_on": ["implement", "type_check"],
+                    "inputs": {"prompt": "review", "artifact_id": "artifact"},
+                },
+                {"id": "approval", "type": "human_approval", "depends_on": ["qa"]},
+            ],
+        }
+    )
+    MethodologyRegistry(
+        baseline.broker.db, validators=frozenset({"type_check"})
+    ).seed(
+        MethodologyVersion(
+            methodology_id="dev-adversarial",
+            version="1.1.0",
+            definition=definition,
+            mandatory_gates=frozenset({"type_check"}),
+        ),
+        actor="test-bootstrap",
+    )
+    gate = CommandGate(
+        gate_id="type_check",
+        argv=("python3", "-c", "raise SystemExit(0)")
+        if type_check_passes
+        else ("python3", "-c", "raise SystemExit(1)"),
+    )
+    loop = AdversarialLoop(
+        baseline.broker,
+        baseline.manager,
+        baseline.orchestrator,
+        baseline.implementer,
+        baseline.qa,
+        baseline.quality_gate,
+        baseline.repository,
+        baseline.worktree_root,
+        baseline.gates + (gate,),
+        executor="simulated",
+        max_iterations=2,
+        local_approvers=frozenset({"supervisor"}),
+        methodology_version="1.1.0",
+    )
+    return loop, adapter
+
+
+def test_published_version_runs_type_check_before_qa(tmp_path: Path) -> None:
+    loop, adapter = setup_published(tmp_path)
+    run_id = loop.create("divide", "Fix zero handling", ("zero raises",), ("calc.py",))
+    assert asyncio.run(loop.run(run_id)) == "WAITING_APPROVAL"
+    assert adapter.implementations == 2
+    with loop.broker.db.connect() as connection:
+        binding = connection.execute(
+            "SELECT version FROM methodology_run_bindings WHERE run_id=?", (run_id,)
+        ).fetchone()
+    assert binding["version"] == "1.1.0"
+    gate = loop.broker.get_message(f"gate:{run_id}:1:type_check")
+    assert gate is not None
+    history = loop.history(run_id)["messages"]
+    reviews = [message for message in history if message["type"] == "REVIEW_REQUEST"]
+    assert reviews and gate.created_at.isoformat() < reviews[0]["created_at"]
+
+
+def test_failed_published_pre_qa_gate_blocks_review(tmp_path: Path) -> None:
+    loop, adapter = setup_published(tmp_path, type_check_passes=False)
+    run_id = loop.create("divide", "Fix zero handling", ("zero raises",), ("calc.py",))
+    assert asyncio.run(loop.run(run_id)) == "BLOCKED"
+    assert adapter.implementations == 1
+    assert not any(
+        message["type"] == "REVIEW_REQUEST"
+        for message in loop.history(run_id)["messages"]
+    )
 
 
 def test_two_iterations_reach_human_approval(tmp_path: Path) -> None:

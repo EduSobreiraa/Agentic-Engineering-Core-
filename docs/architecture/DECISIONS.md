@@ -171,3 +171,13 @@ Estas decisões foram aceitas no escopo inicial. Mudanças futuras devem acresce
 **Decisão:** cada execução mantém uma trava POSIX de arquivo até a persistência do resultado; cada workspace tem outra trava durante a chamada ao adapter. A reconciliação marca `INTERRUPTED` somente quando consegue adquirir a trava da execução. As travas ficam ao lado do SQLite e permitem paralelismo entre workspaces distintos. O controller adversarial cria worktrees; o manager genérico recebe um diretório já existente.
 
 **Efeito:** managers no mesmo sistema de arquivos local não executam simultaneamente no mesmo workspace nem interrompem um turno com dono ativo. O scheduler de workflow e o controller adversarial não ganharam coordenação entre processos; cada run ainda requer um único scheduler ativo. Não há garantia de lock em armazenamento remoto ou Windows.
+
+## ADR-018: Seleção de versões publicadas pelo controller adversarial
+
+**Estado:** implementado em 2026-10-18.
+
+**Contexto:** o Registry publicava `dev-adversarial@1.1.0`, mas o controller especializado continuava a executar sempre `1.0.0`, sem garantir que um gate proposto antes do QA fosse aplicado.
+
+**Decisão:** o controller aceita uma versão publicada explicitamente selecionada somente quando a definição tem a topologia que ele implementa. Validadores declarados como dependências do QA rodam no snapshot antes da revisão, com resultados persistidos e mensagens ACP. A criação da execução grava o vínculo de versão na mesma transação. Execuções legadas sem seleção continuam em `1.0.0`; uma execução vinculada não aceita retomada por um controller configurado para outra versão.
+
+**Efeito:** versões compatíveis podem ser adotadas após publicação supervisionada, sem mudar execuções antigas. Definições de outras topologias exigem outro controller ou o Workflow Engine genérico.

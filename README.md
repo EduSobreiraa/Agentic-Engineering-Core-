@@ -56,7 +56,7 @@ O [roadmap](docs/ROADMAP.md) registra o progresso. A [arquitetura](docs/architec
 
 ## Governança metodológica
 
-A Fase 6 inicial lê históricos tipados, calcula métricas, gera RFCs pelo Documentation Worker da Fase 5, avalia propostas e publica versões após decisão humana local. Execute `uv run pytest -q tests/scenarios/test_methodology_evolution.py` para o cenário controlado. Veja o [diagnóstico e os limites](docs/methodology-worker/ARCHITECTURE.md). O controlador adversarial da Fase 4 continua fixo em `1.0.0`.
+A Fase 6 inicial lê históricos tipados, calcula métricas, gera RFCs pelo Documentation Worker da Fase 5, avalia propostas e publica versões após decisão humana local. Execute `uv run pytest -q tests/scenarios/test_methodology_evolution.py` para o cenário controlado. Veja o [diagnóstico e os limites](docs/methodology-worker/ARCHITECTURE.md). O controlador adversarial pode selecionar uma versão publicada compatível, incluindo um gate antes do QA.
 
 ## Limites atuais
 
