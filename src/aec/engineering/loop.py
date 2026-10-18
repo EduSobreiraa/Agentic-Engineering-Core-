@@ -21,6 +21,7 @@ from aec.communication.schemas import (
 from aec.communication.schemas import (
     ReworkRequest as ACPReworkRequest,
 )
+from aec.execution.locking import LocalLock, held
 from aec.execution.manager import ExecutionManager
 from aec.execution.models import ExecutionResult
 from aec.methodology.governance import MethodologyRegistry
@@ -426,11 +427,14 @@ class AdversarialLoop:
     async def run(self, run_id: str) -> str:
         if run_id in self._active:
             raise RuntimeError("engineering run is already active")
-        self._active.add(run_id)
-        try:
-            return await self._run(run_id)
-        finally:
-            self._active.remove(run_id)
+        async with held(self.broker.db.path, f"engineering:{run_id}"):
+            if run_id in self._active:
+                raise RuntimeError("engineering run is already active")
+            self._active.add(run_id)
+            try:
+                return await self._run(run_id)
+            finally:
+                self._active.remove(run_id)
 
     async def _run(self, run_id: str) -> str:
         while True:
@@ -938,6 +942,17 @@ class AdversarialLoop:
     async def cancel(self, run_id: str, actor: str) -> str:
         if actor not in self.local_approvers:
             raise PermissionError("local actor cannot cancel")
+        if run_id in self._active:
+            return await self._cancel_owned(run_id, actor)
+        lock = LocalLock(self.broker.db.path, f"engineering:{run_id}")
+        try:
+            if not lock.try_acquire():
+                raise RuntimeError("engineering run is active in another controller")
+            return await self._cancel_owned(run_id, actor)
+        finally:
+            lock.close()
+
+    async def _cancel_owned(self, run_id: str, actor: str) -> str:
         row = self._row(run_id)
         if row["status"] not in {"RUNNING", "WAITING_APPROVAL"}:
             raise ValueError("engineering run cannot be cancelled")

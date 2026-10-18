@@ -127,6 +127,50 @@ def test_complete_persisted_workflow_and_recovery(tmp_path: Path) -> None:
     assert restarted.repository.definition(run.run_id) == example()
 
 
+def test_second_engine_waits_for_same_workflow(tmp_path: Path) -> None:
+    class HoldingAdapter(SimulatedAdapter):
+        def __init__(self) -> None:
+            super().__init__()
+            self.started = asyncio.Event()
+            self.release = asyncio.Event()
+
+        async def execute(
+            self, request: ExecutionRequest, provider_session_id: str | None = None
+        ) -> ExecutionResult:
+            if not self.prompts:
+                self.started.set()
+                await self.release.wait()
+            return await super().execute(request, provider_session_id)
+
+    engine, _ = setup_engine(tmp_path)
+    adapter = HoldingAdapter()
+    engine.manager.adapters["simulated"] = adapter
+    run = engine.create(example())
+
+    async def scenario() -> None:
+        first = asyncio.create_task(engine.run(run.run_id))
+        await adapter.started.wait()
+        second_engine, _ = setup_engine(tmp_path)
+        second_engine.manager.adapters["simulated"] = adapter
+        second = asyncio.create_task(second_engine.run(run.run_id))
+        await asyncio.sleep(0.05)
+        assert (
+            second_engine.repository.get_run(run.run_id).status
+            == WorkflowStatus.RUNNING
+        )
+        with pytest.raises(RuntimeError, match="another engine"):
+            second_engine.cancel(run.run_id)
+        adapter.release.set()
+        results = await asyncio.gather(first, second)
+        assert [result.status for result in results] == [
+            WorkflowStatus.WAITING_APPROVAL,
+            WorkflowStatus.WAITING_APPROVAL,
+        ]
+
+    asyncio.run(scenario())
+    assert len(adapter.prompts) == 2
+
+
 def test_rejection_and_unknown_execution(tmp_path: Path) -> None:
     engine, _ = setup_engine(tmp_path)
     run = engine.create(example())

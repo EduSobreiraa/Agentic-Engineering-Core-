@@ -181,3 +181,13 @@ Estas decisões foram aceitas no escopo inicial. Mudanças futuras devem acresce
 **Decisão:** o controller aceita uma versão publicada explicitamente selecionada somente quando a definição tem a topologia que ele implementa. Validadores declarados como dependências do QA rodam no snapshot antes da revisão, com resultados persistidos e mensagens ACP. A criação da execução grava o vínculo de versão na mesma transação. Execuções legadas sem seleção continuam em `1.0.0`; uma execução vinculada não aceita retomada por um controller configurado para outra versão.
 
 **Efeito:** versões compatíveis podem ser adotadas após publicação supervisionada, sem mudar execuções antigas. Definições de outras topologias exigem outro controller ou o Workflow Engine genérico.
+
+## ADR-019: Posse local por execução de workflow
+
+**Estado:** implementado em 2026-10-18; complementa ADR-017.
+
+**Contexto:** mesmo com execuções de agentes protegidas, dois motores podiam tentar recuperar ou avançar o mesmo workflow simultaneamente. Um segundo motor podia marcar como incerto um passo ainda ativo no primeiro.
+
+**Decisão:** `WorkflowEngine.run()` mantém uma trava local por run durante o agendamento; `recover()` externo apenas lê enquanto a trava está ocupada. `AdversarialLoop.run()` mantém outra trava por execução de engenharia. Cancelamento vindo de outra instância durante a execução é recusado porque o adapter ativo pertence ao processo dono.
+
+**Efeito:** uma segunda instância espera e não repete agentes. A coordenação depende de travas POSIX no mesmo sistema de arquivos e não fornece agendamento distribuído nem cancelamento remoto.

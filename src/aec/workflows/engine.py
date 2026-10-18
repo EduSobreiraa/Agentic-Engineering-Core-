@@ -18,6 +18,7 @@ from aec.communication.schemas import (
     TaskFailed,
     ValidationResult,
 )
+from aec.execution.locking import LocalLock, held
 from aec.execution.manager import ExecutionManager
 from aec.execution.models import ExecutionRequest, ExecutionResult, ExecutionStatus
 from aec.security.identities import Identity, Role
@@ -399,13 +400,19 @@ class WorkflowEngine:
     async def run(self, run_id: str) -> WorkflowRun:
         if run_id in self._active:
             raise RuntimeError("workflow is already running in this process")
+        async with held(self.broker.db.path, f"workflow:{run_id}"):
+            return await self._run_owned(run_id)
+
+    async def _run_owned(self, run_id: str) -> WorkflowRun:
+        if run_id in self._active:
+            raise RuntimeError("workflow is already running in this process")
         self._active.add(run_id)
         task = asyncio.current_task()
         if task is not None:
             self._tasks[run_id] = task
         try:
             definition = self.repository.definition(run_id)
-            run = self.recover(run_id)
+            run = self._recover(run_id)
             if run.status == WorkflowStatus.VALIDATED:
                 self.repository.workflow_status(run_id, WorkflowStatus.RUNNING)
             elif run.status not in {
@@ -500,6 +507,15 @@ class WorkflowEngine:
         return self.repository.get_run(run_id)
 
     def recover(self, run_id: str) -> WorkflowRun:
+        lock = LocalLock(self.broker.db.path, f"workflow:{run_id}")
+        try:
+            if not lock.try_acquire():
+                return self.repository.get_run(run_id)
+            return self._recover(run_id)
+        finally:
+            lock.close()
+
+    def _recover(self, run_id: str) -> WorkflowRun:
         run = self.repository.get_run(run_id)
         if run.status == WorkflowStatus.FAILED:
             self._publish_failure(run_id)
@@ -570,6 +586,17 @@ class WorkflowEngine:
         return self.repository.get_run(run_id)
 
     def cancel(self, run_id: str) -> WorkflowRun:
+        if run_id in self._active:
+            return self._cancel_owned(run_id)
+        lock = LocalLock(self.broker.db.path, f"workflow:{run_id}")
+        try:
+            if not lock.try_acquire():
+                raise RuntimeError("workflow is active in another engine")
+            return self._cancel_owned(run_id)
+        finally:
+            lock.close()
+
+    def _cancel_owned(self, run_id: str) -> WorkflowRun:
         run = self.repository.get_run(run_id)
         if run.status not in {
             WorkflowStatus.CREATED,

@@ -57,7 +57,7 @@ Cada item tem um identificador estável para vincular issues, commits e evidênc
 - [x] F3-08 Implementar regras de interrupção. Evidência: timeout, cancelamento e estado `INTERRUPTED` para resultado incerto.
 - [x] F3-09 Recuperar workflows após falhas. Evidência: `recover()` reconcilia resultados conhecidos e preserva aprovação pendente.
 
-**Estado:** motor local de workflows acíclicos, versionados e persistentes implementado com adapter simulado e verificado com dois turnos Codex reais até `WAITING_APPROVAL`. Coordenação entre processos permanece pendente. A Fase 4 acrescentou o ciclo Implementador e QA como metodologia especializada.
+**Estado:** motor local de workflows acíclicos, versionados e persistentes implementado com adapter simulado e verificado com dois turnos Codex reais até `WAITING_APPROVAL`. Travas locais impedem dois motores de executar o mesmo workflow ao mesmo tempo; não há coordenação distribuída. A Fase 4 acrescentou o ciclo Implementador e QA como metodologia especializada.
 
 ## Fase 4: ciclo adversarial de engenharia
 
@@ -73,7 +73,7 @@ Cada item tem um identificador estável para vincular issues, commits e evidênc
 - [x] F4-10 Exigir aprovação humana antes do merge. Evidência: `WAITING_APPROVAL` e teste de autorização.
 - [x] F4-11 Executar experimento completo em repositório de teste. Evidência: cenário simulado em `tests/scenarios/test_adversarial_loop.py` e [execução com quatro turnos Codex reais](engineering/REAL_CODEX_EXPERIMENT.md), encerrada em `WAITING_APPROVAL`.
 
-**Estado:** Implementador, QA, correção e validação funcionaram em uma execução real com Codex; o pedido de aprovação permaneceu pendente, sem decisão humana. Um teste de falha após o commit do controller confirmou recuperação sem repetir o agente. Isolamento de sistema operacional e resultados externos ainda desconhecidos continuam pendentes.
+**Estado:** Implementador, QA, correção e validação funcionaram em uma execução real com Codex; o pedido de aprovação permaneceu pendente, sem decisão humana. Um teste de falha após o commit do controller confirmou recuperação sem repetir o agente. Travas locais impedem dois controllers de executar o mesmo run. Isolamento de sistema operacional e resultados externos ainda desconhecidos continuam pendentes.
 
 ## Fase 5: documentação
 

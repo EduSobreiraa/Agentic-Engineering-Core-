@@ -323,6 +323,64 @@ def test_two_iterations_reach_human_approval(tmp_path: Path) -> None:
     )
 
 
+def test_second_controller_waits_for_same_run(tmp_path: Path) -> None:
+    class HoldingAgents(SimulatedAgents):
+        def __init__(self) -> None:
+            super().__init__()
+            self.started = asyncio.Event()
+            self.release = asyncio.Event()
+
+        async def execute(
+            self, request: ExecutionRequest, provider_session_id: str | None = None
+        ) -> ExecutionResult:
+            if request.agent_id == "implementer" and self.implementations == 0:
+                self.started.set()
+                await self.release.wait()
+            return await super().execute(request, provider_session_id)
+
+    loop, _ = setup(tmp_path)
+    adapter = HoldingAgents()
+    loop.manager.adapters["simulated"] = adapter
+    run_id = loop.create("divide", "Fix zero handling", ("zero raises",), ("calc.py",))
+
+    async def scenario() -> None:
+        first = asyncio.create_task(loop.run(run_id))
+        await adapter.started.wait()
+        other_manager = ExecutionManager(
+            loop.broker,
+            {"simulated": adapter},
+            [tmp_path / "worktrees"],
+            writable_agents=frozenset({"implementer"}),
+        )
+        second_loop = AdversarialLoop(
+            loop.broker,
+            other_manager,
+            loop.orchestrator,
+            loop.implementer,
+            loop.qa,
+            loop.quality_gate,
+            loop.repository,
+            loop.worktree_root,
+            loop.gates,
+            executor="simulated",
+            max_iterations=2,
+            local_approvers=frozenset({"supervisor"}),
+        )
+        second = asyncio.create_task(second_loop.run(run_id))
+        await asyncio.sleep(0.05)
+        assert second_loop.history(run_id)["run"]["status"] == "RUNNING"
+        with pytest.raises(RuntimeError, match="another controller"):
+            await second_loop.cancel(run_id, "supervisor")
+        adapter.release.set()
+        assert tuple(await asyncio.gather(first, second)) == (
+            "WAITING_APPROVAL",
+            "WAITING_APPROVAL",
+        )
+
+    asyncio.run(scenario())
+    assert adapter.implementations == 2
+
+
 def test_iteration_limit_blocks(tmp_path: Path) -> None:
     loop, adapter = setup(tmp_path, never_fix=True)
     run_id = loop.create("divide", "Fix zero handling", ("zero raises",), ("calc.py",))
