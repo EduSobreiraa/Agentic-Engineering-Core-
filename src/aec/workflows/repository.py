@@ -21,7 +21,12 @@ class WorkflowRepository:
     def __init__(self, db: Database) -> None:
         self.db = db
 
-    def create(self, run_id: str, definition: WorkflowDefinition) -> WorkflowRun:
+    def create(
+        self,
+        run_id: str,
+        definition: WorkflowDefinition,
+        binding: tuple[str, str, str] | None = None,
+    ) -> WorkflowRun:
         created = now()
         with self.db.connect() as db:
             db.execute("BEGIN IMMEDIATE")
@@ -39,6 +44,11 @@ class WorkflowRepository:
                 "INSERT INTO workflow_steps(run_id, step_id, status) VALUES (?, ?, ?)",
                 [(run_id, step.id, StepStatus.PENDING) for step in definition.steps],
             )
+            if binding is not None:
+                db.execute(
+                    "INSERT INTO methodology_run_bindings VALUES (?,?,?,?)",
+                    (run_id, *binding),
+                )
             self._event(db, run_id, None, "CREATED", None)
         return self.get_run(run_id)
 

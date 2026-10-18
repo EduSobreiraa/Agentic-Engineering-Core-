@@ -23,7 +23,7 @@ O risco principal era confundir uma proposta ACP com autorização humana. O des
 - A autenticação por `local_approvers` é local, como na Fase 3. Ela não prova identidade entre máquinas.
 - O avaliador executa um benchmark local fornecido pelo chamador e registra os resultados por tarefa. O AEC ainda não executa tarefas equivalentes automaticamente pelo Execution Manager. O operador deve conferir o benchmark e as condições antes de aprovar.
 - O `AdversarialLoop` aceita somente a topologia conhecida de Implementador, validadores anteriores ao QA, QA e aprovação humana. Outras metodologias publicadas continuam restritas ao Workflow Engine genérico.
-- Uma queda entre `WorkflowEngine.create_published()` e `bind_run()` pode deixar uma execução criada sem vínculo no Registry. A definição da execução permanece fixa no Workflow Engine e o vínculo pode ser recuperado com `bind_run()`.
+- `WorkflowEngine.create_published()` grava a execução e seu vínculo metodológico na mesma transação; falha no vínculo desfaz a criação.
 - Versões sem `required_documents` mantêm a completude documental indisponível. O cálculo verifica o hash do registro e a integridade do arquivo.
 - Não houve teste com dois processos de publicação nem autenticação remota. O SQLite serializa as transações de publicação locais.
 - A análise assistida por Codex não foi ligada nesta etapa. Uma integração futura pode usar o `ExecutionAdapter` existente para sugerir hipóteses, mantendo métricas, avaliação e publicação no código determinístico.

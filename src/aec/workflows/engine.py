@@ -83,6 +83,14 @@ class WorkflowEngine:
     def create(
         self, definition: WorkflowDefinition, run_id: str | None = None
     ) -> WorkflowRun:
+        return self._create(definition, run_id, None)
+
+    def _create(
+        self,
+        definition: WorkflowDefinition,
+        run_id: str | None,
+        binding: tuple[str, str, str] | None,
+    ) -> WorkflowRun:
         validate(definition)
         for step in definition.steps:
             if step.type == "agent" and (
@@ -99,7 +107,7 @@ class WorkflowEngine:
                     raise ValueError("QA needs read-only mode and artifact_id")
             if step.type == "validation" and step.validator not in self.validators:
                 raise ValueError("validator is not registered")
-        run = self.repository.create(run_id or str(uuid4()), definition)
+        run = self.repository.create(run_id or str(uuid4()), definition, binding)
         self.repository.workflow_status(run.run_id, WorkflowStatus.VALIDATED)
         return self.repository.get_run(run.run_id)
 
@@ -110,10 +118,20 @@ class WorkflowEngine:
         version: str,
         run_id: str | None = None,
     ) -> WorkflowRun:
+        if Path(registry.db.path).resolve() != Path(self.broker.db.path).resolve():
+            raise ValueError("registry and workflow must share a database")
         definition = registry.get(methodology_id, version).definition
-        run = self.create(definition, run_id)
-        registry.bind_run(run.run_id, methodology_id, version)
-        return run
+        with self.broker.db.connect() as db:
+            row = db.execute(
+                "SELECT sha256 FROM methodology_versions "
+                "WHERE methodology_id=? AND version=?",
+                (methodology_id, version),
+            ).fetchone()
+        if row is None:
+            raise KeyError((methodology_id, version))
+        return self._create(
+            definition, run_id, (methodology_id, version, str(row["sha256"]))
+        )
 
     def _ready(
         self, definition: WorkflowDefinition, steps: dict[str, StepRun]

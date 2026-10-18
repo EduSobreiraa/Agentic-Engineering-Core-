@@ -1,4 +1,5 @@
 import asyncio
+import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
@@ -92,6 +93,18 @@ def test_create_from_published_methodology(tmp_path: Path) -> None:
             (run.run_id,),
         ).fetchone()
     assert binding["version"] == "1.0.0"
+    with engine.broker.db.connect() as connection:
+        connection.execute(
+            "CREATE TRIGGER reject_methodology_binding "
+            "BEFORE INSERT ON methodology_run_bindings "
+            "BEGIN SELECT RAISE(ABORT, 'binding failed'); END"
+        )
+    with pytest.raises(sqlite3.IntegrityError, match="binding failed"):
+        engine.create_published(
+            registry, definition.id, definition.version, run_id="rolled-back"
+        )
+    with pytest.raises(KeyError):
+        engine.repository.get_run("rolled-back")
 
 
 def test_complete_persisted_workflow_and_recovery(tmp_path: Path) -> None:

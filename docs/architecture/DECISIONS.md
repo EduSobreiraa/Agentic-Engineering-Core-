@@ -191,3 +191,13 @@ Estas decisões foram aceitas no escopo inicial. Mudanças futuras devem acresce
 **Decisão:** `WorkflowEngine.run()` mantém uma trava local por run durante o agendamento; `recover()` externo apenas lê enquanto a trava está ocupada. `AdversarialLoop.run()` mantém outra trava por execução de engenharia. Cancelamento vindo de outra instância durante a execução é recusado porque o adapter ativo pertence ao processo dono.
 
 **Efeito:** uma segunda instância espera e não repete agentes. A coordenação depende de travas POSIX no mesmo sistema de arquivos e não fornece agendamento distribuído nem cancelamento remoto.
+
+## ADR-020: Criação atômica de workflow metodológico
+
+**Estado:** implementado em 2026-10-18.
+
+**Contexto:** `WorkflowEngine.create_published()` criava um workflow e só depois gravava o vínculo com a versão publicada. Uma falha no segundo passo deixava uma execução sem versão metodológica registrada.
+
+**Decisão:** o repositório de workflows grava o vínculo opcional na mesma transação SQLite que cria o run, seus passos e o evento inicial. O motor só passa esse vínculo depois de consultar uma versão publicada no Registry do mesmo banco.
+
+**Efeito:** falha na gravação do vínculo desfaz a criação inteira. A execução já iniciada continua presa à definição e ao hash selecionados.
