@@ -1,0 +1,11 @@
+# Recuperação e tentativas
+
+O SQLite compartilha transações curtas com ACP e Execution Layer. Cada execução guarda uma cópia da definição e hash, estados por etapa, tentativas, aprovações e eventos. `WorkflowRepository.definition(run_id)` verifica o hash armazenado antes de retornar a definição. `events(run_id)`, `steps(run_id)` e o histórico do broker permitem inspecionar a execução.
+
+Após reiniciar, `recover(run_id)` examina workflows em `RUNNING`. Para uma etapa `RUNNING` com resultado final conhecido no repositório da Execution Layer e mensagem ACP correspondente, reconcilia o estado. Também reconcilia uma validação local quando o `VALIDATION_RESULT` autorizado já foi publicado. Se o resultado permanece desconhecido, marca a etapa e o workflow `INTERRUPTED`; não a executa novamente. Em `WAITING_APPROVAL`, `recover()` conserva uma solicitação pendente, aplica uma decisão já gravada ou encerra a execução se o limite total expirou. Um workflow `INTERRUPTED` só pode ser cancelado pela interface atual.
+
+Etapas `agent` e `human_approval` aceitam uma única tentativa. Validadores locais podem usar `retry_policy.max_attempts` até 10; somente `TransientValidationError` solicita nova tentativa. Outras exceções e timeout encerram a etapa com falha. Um `False` booleano é um resultado válido, não uma falha transitória. Timeout de etapa de agente é delegado ao Execution Manager. O limite total também interrompe o lote ativo no mesmo processo. Enquanto aguarda aprovação, o prazo é conferido quando o código chama `recover()`, `run()` ou `decide()`; não há timer de fundo.
+
+`cancel(run_id)` muda o estado persistido, cancela etapas ainda pendentes, prontas ou aguardando aprovação e solicita o cancelamento da tarefa `asyncio` ativa no mesmo processo. Não coordena outros processos. Inspecione o resultado de uma execução externa antes de iniciar outra ação. A fronteira entre publicar no ACP e gravar o estado não possui outbox transacional nesta versão.
+
+A autorização de `decide(run_id, step_id, actor, approved)` usa a lista `local_approvers` fornecida pelo código confiável. Não autentica uma pessoa nem protege contra outro processo local que possa chamar a função ou alterar o SQLite. Restrinja o banco e a aplicação ao ambiente local supervisionado.

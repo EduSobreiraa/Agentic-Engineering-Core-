@@ -81,3 +81,33 @@ Estas decisões foram aceitas no escopo inicial. Mudanças futuras devem acresce
 **Decisão:** o manager exige identidade local válida e uma atribuição ACP persistida, vincula cada mensagem de origem a no máximo uma execução, grava estados e nunca reinicia automaticamente turnos interrompidos. `workspace-write` exige concessão ao agente no manager e `metadata.workspace_write=true` na atribuição do orquestrador. Somente o manager publica resultados com identidade autorizada. Sessões internas AEC e IDs do Codex ficam separados. O isolamento de escrita por diretório vale dentro de um único manager.
 
 **Efeito:** o SQLite conserva resultado e histórico para inspeção. A implantação deve usar um manager ativo por banco; coordenação entre processos requer projeto posterior. Código gerado não aprova seu próprio quality gate.
+
+## ADR-009: Workflows acíclicos e definição fixada por execução
+
+**Estado:** aceito em 2026-10-18.
+
+**Contexto:** execução reproduzível exige dependências sem ambiguidade e proteção contra mudanças posteriores no YAML.
+
+**Decisão:** a Fase 3 aceita um grafo acíclico. O loader usa PyYAML `safe_load` para interpretar YAML e Pydantic para validar referências, ciclos, versão 1.x.y e campos tipados. PyYAML é a dependência necessária para o formato YAML solicitado; `types-PyYAML` serve apenas à checagem estática de desenvolvimento. A criação da execução grava a definição normalizada e seu hash SHA-256 no SQLite. Uma leitura verifica esse hash. Repetições adversariais terão contrato próprio na Fase 4, com limites e saída explícitos.
+
+**Efeito:** uma alteração no arquivo não muda execuções existentes. O hash cobre a definição validada, não os bytes originais do YAML.
+
+## ADR-010: Scheduler local e recuperação conservadora
+
+**Estado:** aceito em 2026-10-18.
+
+**Contexto:** o manager da Fase 2 controla concorrência no processo e efeitos externos podem ocorrer antes de o workflow registrar seu resultado.
+
+**Decisão:** o motor agenda lotes até `max_parallel_steps`; o manager mantém limite próprio e trava por workspace. Só validadores Python registrados podem repetir tentativas. Agentes e aprovações têm uma tentativa. Ao reiniciar, resultado final conhecido é reconciliado; resultado desconhecido marca `INTERRUPTED` sem reexecutar. A instalação usa um manager ativo por banco.
+
+**Efeito:** não há retomada automática de ações externas incertas, coordenação entre processos ou outbox transacional entre ACP e workflow. O limite total interrompe lotes ativos no processo e é conferido ao consultar uma aprovação pendente. Diretórios separados por agente permitem paralelismo real; o cancelamento de tarefa ativa vale apenas no processo local.
+
+## ADR-011: Aprovação humana local e condições tipadas
+
+**Estado:** aceito em 2026-10-18.
+
+**Contexto:** uma mensagem de agente não comprova aprovação, e não existe autenticação humana confiável no núcleo local.
+
+**Decisão:** `human_approval` grava pedido e suspende o workflow. Uma chamada Python `decide()` exige que o identificador do ator conste de `local_approvers` e registra aprovação ou rejeição. Condições comparam apenas o booleano `passed` de uma validação registrada; texto livre não altera a política.
+
+**Efeito:** aprovação e eventos ficam auditáveis no SQLite. A lista de atores é uma autorização local fornecida pelo código confiável, sem prova criptográfica de identidade; a aplicação deve permanecer em ambiente local supervisionado.

@@ -1,6 +1,6 @@
 # Agentic Engineering Core
 
-O Agentic Engineering Core (AEC) é um projeto Python para coordenar trabalho de engenharia entre agentes especializados, verificações determinísticas e aprovação humana. A Fase 1 implementa o ACP v0.1 para agentes simulados, com validação Pydantic, broker local e persistência SQLite.
+O Agentic Engineering Core (AEC) é um projeto Python para coordenar trabalho de engenharia entre agentes especializados, verificações determinísticas e aprovação humana. A Fase 1 implementa o ACP v0.1; a Fase 2 acrescenta execução por adapters; a Fase 3 acrescenta workflows declarativos e persistentes.
 
 ## Começar
 
@@ -12,6 +12,7 @@ uv run pytest
 uv run ruff check .
 uv run mypy
 uv run python -m aec.simulation.agents
+uv run pytest tests/workflows/test_engine.py -q
 ```
 
 O ambiente de desenvolvimento usa ferramentas locais e não exige `OPENAI_API_KEY`. A Fase 2 integra o executável Codex CLI e usa a autenticação já disponível. O teste padrão usa um executável falso e não consome a assinatura.
@@ -24,13 +25,24 @@ uv run python -m aec.execution.demo --database /tmp/aec-phase2.sqlite --workspac
 
 Esse comando inicia dois turnos Codex read-only e consome capacidade da assinatura. Consulte [execução](docs/execution/EXECUTION_LAYER.md), [contratos](docs/execution/EXECUTOR_CONTRACT.md) e [testes](docs/execution/TESTING.md).
 
+## Workflow Engine (Fase 3)
+
+Execute o cenário declarativo com adapter simulado e aprovação local explícita:
+
+```bash
+uv run python -m aec.workflows.demo --approve
+```
+
+O comando imprime o `run_id` e o estado final. Sem `--approve`, ele para em `WAITING_APPROVAL`. Use `--database` e `--workspace` para escolher os caminhos locais. `--real-codex` é opt-in: executa dois turnos Codex read-only e consome capacidade da assinatura. A suíte padrão nunca usa essa opção. Veja o [esquema e os limites](docs/workflows/WORKFLOW_ENGINE.md).
+
 ## Estrutura
 
 ```text
 src/aec/                  pacote Python
 tests/                    verificações do pacote
 docs/architecture/        arquitetura, componentes e decisões
-docs/protocols/             contratos e limites do ACP v0.1
+docs/protocols/            contratos e limites do ACP v0.1
+docs/workflows/            contratos e limites dos workflows
 docs/ROADMAP.md           tarefas e critérios por fase
 ```
 
@@ -38,4 +50,4 @@ O [roadmap](docs/ROADMAP.md) registra o progresso. A [arquitetura](docs/architec
 
 ## Limites atuais
 
-O ACP v0.1 permanece independente de executores. A Execution Layer inicia processos Codex e guarda estados, mas não executa workflows nem quality gates. Handles locais não oferecem autenticação segura entre máquinas. Reinícios interrompem turnos em andamento sem os repetir automaticamente.
+O ACP v0.1 permanece independente de executores. A Execution Layer inicia processos e guarda estados. O Workflow Engine coordena grafos acíclicos e validadores Python registrados, mas não implementa o ciclo adversarial da Fase 4. Handles e aprovação local não autenticam usuários entre máquinas. Reinícios não repetem turnos externos de resultado incerto. Use um único manager ativo por banco; o workflow com Codex CLI foi verificado em um ensaio local read-only em 2026-10-18, até `WAITING_APPROVAL`.

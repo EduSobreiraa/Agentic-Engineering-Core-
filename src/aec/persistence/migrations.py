@@ -74,6 +74,35 @@ MIGRATIONS = (
         last_used_at TEXT NOT NULL
     );
     """,
+    """
+    CREATE TABLE workflow_runs (
+        run_id TEXT PRIMARY KEY, definition TEXT NOT NULL,
+        definition_hash TEXT NOT NULL,
+        status TEXT NOT NULL, created_at TEXT NOT NULL, started_at TEXT,
+        finished_at TEXT, error TEXT
+    );
+    CREATE TABLE workflow_steps (
+        run_id TEXT NOT NULL REFERENCES workflow_runs(run_id), step_id TEXT NOT NULL,
+        status TEXT NOT NULL, attempt INTEGER NOT NULL DEFAULT 0,
+        execution_id TEXT, started_at TEXT, finished_at TEXT, result TEXT,
+        PRIMARY KEY(run_id, step_id)
+    );
+    CREATE TABLE workflow_attempts (
+        run_id TEXT NOT NULL, step_id TEXT NOT NULL, attempt INTEGER NOT NULL,
+        execution_id TEXT, status TEXT NOT NULL, result TEXT, created_at TEXT NOT NULL,
+        PRIMARY KEY(run_id, step_id, attempt),
+        FOREIGN KEY(run_id, step_id) REFERENCES workflow_steps(run_id, step_id)
+    );
+    CREATE TABLE workflow_events (
+        event_id INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL,
+        step_id TEXT, kind TEXT NOT NULL, detail TEXT, created_at TEXT NOT NULL
+    );
+    CREATE TABLE workflow_approvals (
+        run_id TEXT NOT NULL, step_id TEXT NOT NULL, status TEXT NOT NULL,
+        decided_by TEXT, decided_at TEXT, PRIMARY KEY(run_id, step_id),
+        FOREIGN KEY(run_id, step_id) REFERENCES workflow_steps(run_id, step_id)
+    );
+    """,
 )
 
 
