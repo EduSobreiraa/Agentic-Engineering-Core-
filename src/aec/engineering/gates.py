@@ -7,6 +7,8 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from aec.execution.policy import ExecutionPolicy
+
 from .git import changed_files, commit_hash
 
 
@@ -29,8 +31,13 @@ class CommandGate(BaseModel):
 
 
 def run_gates(
-    snapshot: Path, reviewed_commit: str, commands: tuple[CommandGate, ...]
+    snapshot: Path,
+    reviewed_commit: str,
+    commands: tuple[CommandGate, ...],
+    *,
+    policy: ExecutionPolicy,
 ) -> list[GateResult]:
+    policy.require(snapshot)
     now = datetime.now(timezone.utc)
     if commit_hash(snapshot) != reviewed_commit or changed_files(snapshot):
         return [

@@ -27,6 +27,7 @@ from aec.security.identities import Identity, Role
 from .base import ExecutionAdapter
 from .locking import held
 from .models import AgentSession, ExecutionRequest, ExecutionResult, ExecutionStatus
+from .policy import ExecutionPolicy
 from .repository import ExecutionRepository
 
 
@@ -37,6 +38,7 @@ class ExecutionManager:
         adapters: dict[str, ExecutionAdapter],
         allowed_roots: list[Path],
         *,
+        policy: ExecutionPolicy,
         max_concurrency: int = 2,
         writable_agents: frozenset[str] = frozenset(),
     ) -> None:
@@ -45,6 +47,7 @@ class ExecutionManager:
         self.broker = broker
         self.adapters = adapters
         self.allowed_roots = [root.resolve(strict=True) for root in allowed_roots]
+        self.policy = policy
         self.writable_agents = writable_agents
         forbidden = {
             Path("/"),
@@ -103,6 +106,7 @@ class ExecutionManager:
             for root in self.allowed_roots
         ):
             raise PermissionError("working directory is outside allowed roots")
+        self.policy.require(request.working_directory)
         return source
 
     async def execute(

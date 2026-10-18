@@ -7,3 +7,7 @@ O código confiável fornece `local_approvers` a `MethodologyGovernance`. O work
 O Registry conserva todas as versões publicadas e seus hashes. `bind_run()` aceita apenas uma execução cujo hash da definição corresponde à versão escolhida. A execução antiga não migra quando a referência ativa muda.
 
 O cenário de teste cria uma identidade humana apenas no próprio teste. Nenhuma aprovação ou publicação real ocorre ao executar a suíte. A autorização local não substitui autenticação para uso remoto.
+
+## Requisitos para uma futura aprovação remota
+
+Uma interface de rede deverá autenticar a pessoa por um mecanismo externo verificável, ligar a identidade autenticada a uma permissão específica de aprovação ou publicação e impedir que agentes forneçam ou alterem essa identidade. A decisão deverá referenciar o ID e o hash da proposta, o hash da avaliação, a ação, o instante e o ator autenticado. O servidor deverá verificar essas referências e a versão ativa em transação antes de publicar; repetição da mesma requisição precisa ser idempotente. Sessões expiradas, silêncio, timeout, mensagens ACP e strings no payload não constituem aprovação. A interface também deverá registrar recusas, revogação de acesso e trilha de auditoria protegida. A lista `local_approvers` não satisfaz esses requisitos fora do operador local supervisionado.

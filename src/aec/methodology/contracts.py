@@ -170,6 +170,36 @@ class BenchmarkPair(BenchmarkCase):
     candidate: Annotated[float, Field(allow_inf_nan=False)]
 
 
+class BenchmarkTask(Contract):
+    task_id: Annotated[str, Field(pattern=r"^[A-Za-z0-9_-]+$")]
+    version: str
+    instructions: Annotated[str, Field(min_length=1)]
+    acceptance_criteria: Annotated[str, Field(min_length=1)]
+    expected_outcome: Literal["qa_pass", "type_rejected_before_qa"]
+    type_check_passes: bool
+
+
+class BenchmarkRun(Contract):
+    task_id: str
+    repetition: Annotated[int, Field(ge=1)]
+    arm: Literal["baseline", "candidate"]
+    run_id: str
+    methodology_version: str
+    definition_sha256: str
+    executed_definition_sha256: str
+    acceptance_sha256: str
+    conditions_sha256: str
+    workflow_status: str
+    accepted: bool
+    gate_passed: bool | None
+    review_iterations: int | None
+    duration_seconds: Annotated[float, Field(ge=0)] | None
+    agent_invocations: Annotated[int, Field(ge=0)]
+    database_path: str
+    workspace_path: str
+    failure: str | None = None
+
+
 class MethodologyEvaluation(Contract):
     evaluation_id: str
     proposal_id: str
@@ -178,6 +208,8 @@ class MethodologyEvaluation(Contract):
     checks: tuple[str, ...]
     limitations: tuple[str, ...]
     pairs: tuple[BenchmarkPair, ...] = ()
+    evidence_kind: Literal["FIXTURE", "EXECUTED"] = "FIXTURE"
+    benchmark_runs: tuple[BenchmarkRun, ...] = ()
     baseline: float | None = None
     candidate: float | None = None
 

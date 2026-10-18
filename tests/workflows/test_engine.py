@@ -10,6 +10,7 @@ from aec.communication.broker import Broker
 from aec.execution.base import ExecutionAdapter
 from aec.execution.manager import ExecutionManager
 from aec.execution.models import ExecutionRequest, ExecutionResult, ExecutionStatus
+from aec.execution.policy import ExecutionPolicy
 from aec.methodology.contracts import MethodologyVersion
 from aec.methodology.governance import MethodologyRegistry
 from aec.security.identities import Role
@@ -53,7 +54,9 @@ def setup_engine(tmp_path: Path) -> tuple[WorkflowEngine, SimulatedAdapter]:
     }
     quality_gate = broker.register("quality-gate", Role.QUALITY_GATE)
     adapter = SimulatedAdapter()
-    manager = ExecutionManager(broker, {"simulated": adapter}, [tmp_path])
+    manager = ExecutionManager(
+        broker, {"simulated": adapter}, [tmp_path], policy=ExecutionPolicy((tmp_path,))
+    )
     engine = WorkflowEngine(
         broker,
         manager,
@@ -241,7 +244,12 @@ def test_malformed_yaml_and_skipped_approval(tmp_path: Path) -> None:
         name: broker.register(name, Role.IMPLEMENTER)
         for name in ("analyst", "implementer")
     }
-    manager = ExecutionManager(broker, {"simulated": SimulatedAdapter()}, [tmp_path])
+    manager = ExecutionManager(
+        broker,
+        {"simulated": SimulatedAdapter()},
+        [tmp_path],
+        policy=ExecutionPolicy((tmp_path,)),
+    )
     engine = WorkflowEngine(
         broker,
         manager,
@@ -285,7 +293,11 @@ def test_parallel_limit_and_safe_validation_retry(tmp_path: Path) -> None:
         path.mkdir()
     adapter = ConcurrentAdapter()
     manager = ExecutionManager(
-        broker, {"simulated": adapter}, [tmp_path], max_concurrency=2
+        broker,
+        {"simulated": adapter},
+        [tmp_path],
+        policy=ExecutionPolicy((tmp_path,)),
+        max_concurrency=2,
     )
     attempts = 0
 
@@ -356,7 +368,12 @@ def test_cancel_running_agent(tmp_path: Path) -> None:
     orchestrator = broker.register("orchestrator", Role.ORCHESTRATOR)
     gate = broker.register("quality-gate", Role.QUALITY_GATE)
     analyst = broker.register("analyst", Role.IMPLEMENTER)
-    manager = ExecutionManager(broker, {"simulated": SlowAdapter()}, [tmp_path])
+    manager = ExecutionManager(
+        broker,
+        {"simulated": SlowAdapter()},
+        [tmp_path],
+        policy=ExecutionPolicy((tmp_path,)),
+    )
     engine = WorkflowEngine(
         broker, manager, orchestrator, {"analyst": analyst}, gate, tmp_path, {}
     )
@@ -420,7 +437,12 @@ def test_skips_propagate_in_topological_order(tmp_path: Path) -> None:
     broker = Broker(tmp_path / "aec.sqlite")
     orchestrator = broker.register("orchestrator", Role.ORCHESTRATOR)
     gate = broker.register("quality-gate", Role.QUALITY_GATE)
-    manager = ExecutionManager(broker, {"simulated": SimulatedAdapter()}, [tmp_path])
+    manager = ExecutionManager(
+        broker,
+        {"simulated": SimulatedAdapter()},
+        [tmp_path],
+        policy=ExecutionPolicy((tmp_path,)),
+    )
     engine = WorkflowEngine(
         broker,
         manager,
@@ -498,7 +520,12 @@ def test_workflow_timeout_cancels_active_execution(tmp_path: Path) -> None:
     orchestrator = broker.register("orchestrator", Role.ORCHESTRATOR)
     gate = broker.register("quality-gate", Role.QUALITY_GATE)
     analyst = broker.register("analyst", Role.IMPLEMENTER)
-    manager = ExecutionManager(broker, {"simulated": SlowAdapter()}, [tmp_path])
+    manager = ExecutionManager(
+        broker,
+        {"simulated": SlowAdapter()},
+        [tmp_path],
+        policy=ExecutionPolicy((tmp_path,)),
+    )
     engine = WorkflowEngine(
         broker, manager, orchestrator, {"analyst": analyst}, gate, tmp_path, {}
     )
@@ -531,7 +558,12 @@ def test_permanent_validator_error_does_not_retry(tmp_path: Path) -> None:
     broker = Broker(tmp_path / "aec.sqlite")
     orchestrator = broker.register("orchestrator", Role.ORCHESTRATOR)
     gate = broker.register("quality-gate", Role.QUALITY_GATE)
-    manager = ExecutionManager(broker, {"simulated": SimulatedAdapter()}, [tmp_path])
+    manager = ExecutionManager(
+        broker,
+        {"simulated": SimulatedAdapter()},
+        [tmp_path],
+        policy=ExecutionPolicy((tmp_path,)),
+    )
     attempts = 0
 
     def invalid(_: dict[str, str]) -> bool:

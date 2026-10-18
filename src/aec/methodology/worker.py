@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import Literal
 
 from aec.communication.broker import Broker
 from aec.communication.errors import ConflictError
@@ -27,6 +28,9 @@ class MethodologyWorker:
         *,
         proposal_id: str,
         proposed_version: str,
+        expected_metric: Literal[
+            "average_review_iterations", "acceptance_rate"
+        ] = "average_review_iterations",
     ) -> tuple[MethodologyFinding, MethodologyProposal]:
         observations = [
             o
@@ -58,8 +62,10 @@ class MethodologyWorker:
                     position="before_qa",
                 ),
             ),
-            expected_metric="average_review_iterations",
-            expected_direction="decrease",
+            expected_metric=expected_metric,
+            expected_direction=(
+                "increase" if expected_metric == "acceptance_rate" else "decrease"
+            ),
             risks="The gate may delay reviews or reject valid work.",
             validation_criteria=(
                 "Compare paired tasks with identical acceptance criteria."

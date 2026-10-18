@@ -201,3 +201,33 @@ Estas decisões foram aceitas no escopo inicial. Mudanças futuras devem acresce
 **Decisão:** o repositório de workflows grava o vínculo opcional na mesma transação SQLite que cria o run, seus passos e o evento inicial. O motor só passa esse vínculo depois de consultar uma versão publicada no Registry do mesmo banco.
 
 **Efeito:** falha na gravação do vínculo desfaz a criação inteira. A execução já iniciada continua presa à definição e ao hash selecionados.
+
+## ADR-021: Admissão explícita de projetos confiáveis
+
+**Estado:** implementado em 2026-10-18.
+
+**Contexto:** a execução de Codex CLI ou command gates em um checkout externo pode rodar código do projeto no host. As travas e o sandbox solicitado à CLI não isolam todas as operações do sistema operacional.
+
+**Decisão:** o operador fornece uma `ExecutionPolicy` com raízes locais específicas e confiáveis. Manager, adapter, controlador adversarial e gates conferem o caminho resolvido antes de executar. Raízes genéricas ou sensíveis são recusadas. A política não confere autoridade a agentes nem substitui isolamento de sistema operacional.
+
+**Efeito:** callers precisam fornecer a política explicitamente. Projetos desconhecidos ficam bloqueados. O AEC continua limitado a execução local supervisionada em projetos confiáveis; a política não protege contra código hostil dentro do próprio processo Python.
+
+## ADR-022: Benchmark local executado e procedência da evidência
+
+**Estado:** implementado em 2026-10-18.
+
+**Contexto:** a comparação original aceitava números de um callback, úteis para fixtures, mas insuficientes para afirmar melhoria observada.
+
+**Decisão:** um runner executa as definições base e candidata com Workflow Engine e SQLite separados por tarefa, repetição e versão. Critérios e condições são comparados por hash; resultados e caminhos dos bancos são gravados na avaliação. O contrato distingue `FIXTURE` de `EXECUTED`. O runner inicial usa adapter roteirizado, tarefas de tipagem e métricas diretamente observáveis. Revisões e retrabalho permanecem indisponíveis nele.
+
+**Efeito:** o resultado executado pode detectar regressão de aceite e apoiar uma decisão humana exploratória. Não há inferência causal nem benchmark de desempenho de Codex. Avaliações `FIXTURE` não autorizam aprovação ou publicação; avaliações executadas continuam exigindo aprovação humana.
+
+## ADR-023: Verificação local entre processos
+
+**Estado:** verificado em 2026-10-18.
+
+**Contexto:** testes em um processo não demonstravam a coordenação prevista nas ADR-017 e ADR-019.
+
+**Decisão:** a suíte inicia processos Python independentes com `spawn`, SQLite compartilhado, concorrência de ACP, manager, workflow e publicação, além de saída abrupta após resultado conhecido e desconhecido. O segundo processo deve consumir mensagens pendentes e recuperar resultados persistidos sem duplicar efeitos. Resultado externo desconhecido permanece `INTERRUPTED`.
+
+**Efeito:** a garantia foi verificada no sistema de arquivos local POSIX usado nos testes. Isso não constitui teste distribuído, de armazenamento remoto ou de isolamento contra código não confiável.

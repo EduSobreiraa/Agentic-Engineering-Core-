@@ -91,21 +91,21 @@ Cada item tem um identificador estável para vincular issues, commits e evidênc
 - [x] F6-01 Criar Worker de Metodologia. Evidência: `methodology/worker.py` e cenário simulado.
 - [x] F6-02 Implementar métricas de execução. Evidência: `methodology/metrics.py`; completude documental é calculada quando a versão declara `required_documents`, com verificação do artefato.
 - [x] F6-03 Produzir propostas metodológicas em RFCs. Evidência: `DocumentationWorker.create_methodology_document()`, registro imutável e cenário simulado.
-- [x] F6-04 Definir avaliação comparativa de metodologias. Evidência: pares tipados e cenário com fixtures; execução automática de benchmarks pendente.
+- [x] F6-04 Definir avaliação comparativa de metodologias. Evidência: pares tipados, cenário com fixtures e runner local de workflows com evidência persistida.
 - [x] F6-05 Implementar aprovação humana. Evidência: `MethodologyGovernance.decide()` e testes de rejeição.
 - [x] F6-06 Publicar novas versões somente após aprovação. Evidência: publicação transacional, `WorkflowEngine.create_published()` e seleção de versão publicada compatível pelo `AdversarialLoop`, com gate anterior ao QA e vínculo persistido.
 - [x] F6-07 Preservar histórico das decisões. Evidência: `methodology_events`, hashes, versões e vínculos de execução.
 
-**Estado:** funcional no ambiente local supervisionado, com validação e endurecimento pendentes. O ciclo usa fixtures e workflows declarativos, integrado ao Documentation Worker da Fase 5. O `AdversarialLoop` seleciona versões publicadas da topologia adversarial suportada e executa gates anteriores ao QA. O avaliador ainda não executa benchmarks controlados por conta própria. Versões sem manifesto documental deixam essa métrica indisponível. A suíte registrada em `.audit/verification.txt` passou com 122 testes e dois cenários Codex opt-in ignorados; `.audit/real-codex-verification.txt` registra os dois cenários opt-in aprovados. Esses resultados não validam um ciclo completo entre processos independentes.
+**Estado:** funcional no ambiente local supervisionado. O ciclo integra o Documentation Worker da Fase 5 e seleciona versões publicadas compatíveis no `AdversarialLoop`. O benchmark local executa workflows com adapter roteirizado; seus resultados são exploratórios e não medem retrabalho. Versões sem manifesto documental deixam a completude indisponível. A verificação anterior está em `.audit/verification.txt` e `.audit/real-codex-verification.txt`; a verificação do fechamento está em `.audit/f6-hardening-verification.txt`.
 
 ## Fechamento da Fase 6 antes da Fase 7
 
-- [ ] F6H-01 Hardening multiprocesso (P0). Testar dois processos Python com o mesmo SQLite: ACP, workers, locks, transições, falha abrupta, recuperação e ausência de efeitos duplicados nos casos com resultado conhecido. Resultado externo incerto continua `INTERRUPTED`.
-- [ ] F6H-02 Benchmark Runner mínimo (P1). Executar tarefas de referência equivalentes nas versões base e candidata, com critérios e condições fixados, ambientes separados e métricas obtidas das execuções. Tratar resultados pequenos como exploratórios.
-- [ ] F6H-03 Segurança operacional (P0). Documentar e impor o bloqueio de código e projetos não confiáveis até existir sandbox de sistema operacional adequado. Manter fluxos locais confiáveis supervisionados.
-- [ ] F6H-04 Identidade remota (P2). Registrar requisitos de autenticação para aprovação remota, sem implementá-la nesta etapa.
+- [x] F6H-01 Hardening multiprocesso (P0). Testes com processos Python independentes, SQLite compartilhado, ACP, manager, workflow, publicação, falha abrupta e recuperação; resultado externo incerto continua `INTERRUPTED`. Evidência: `tests/integration/test_multiprocess.py`.
+- [x] F6H-02 Benchmark Runner mínimo (P1). Tarefas roteirizadas equivalentes, critérios e condições fixados, ambientes separados e métricas obtidas de workflows executados. Evidência: `methodology/benchmark.py` e `tests/integration/test_methodology_benchmark.py`. Resultados pequenos são exploratórios.
+- [x] F6H-03 Segurança operacional (P0). Política explícita de raízes locais confiáveis nos pontos de execução. Projetos externos não declarados são bloqueados. O limite do controle está em `docs/execution/SECURITY.md`.
+- [x] F6H-04 Identidade remota (P2). Requisitos registrados em `docs/methodology-worker/GOVERNANCE.md`; implementação de rede permanece fora do escopo.
 
-O [prompt de fechamento](methodology-worker/PHASE_6_CLOSURE_PROMPT.md) detalha o escopo e os critérios de aceite. Não iniciar a Fase 7 antes de concluir F6H-01 a F6H-03. F6H-04 permanece como requisito documentado para uma futura interface remota.
+O [prompt de fechamento](methodology-worker/PHASE_6_CLOSURE_PROMPT.md) detalha o escopo e os critérios de aceite. A Fase 7 permanece sem implementação nesta branch.
 
 ## Fase 7: expansão metodológica
 

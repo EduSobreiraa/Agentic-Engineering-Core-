@@ -13,6 +13,7 @@ from aec.engineering.loop import AdversarialLoop
 from aec.execution.base import ExecutionAdapter
 from aec.execution.manager import ExecutionManager
 from aec.execution.models import ExecutionRequest, ExecutionResult, ExecutionStatus
+from aec.execution.policy import ExecutionPolicy
 from aec.methodology.contracts import MethodologyVersion
 from aec.methodology.governance import MethodologyRegistry
 from aec.security.identities import Role
@@ -162,6 +163,7 @@ def setup(
         broker,
         {"simulated": adapter},
         [worktrees],
+        policy=ExecutionPolicy((tmp_path,)),
         writable_agents=frozenset({"implementer"}),
     )
     loop = AdversarialLoop(
@@ -350,6 +352,7 @@ def test_second_controller_waits_for_same_run(tmp_path: Path) -> None:
             loop.broker,
             {"simulated": adapter},
             [tmp_path / "worktrees"],
+            policy=ExecutionPolicy((tmp_path,)),
             writable_agents=frozenset({"implementer"}),
         )
         second_loop = AdversarialLoop(
@@ -446,6 +449,7 @@ def test_history_and_approval_survive_restart(tmp_path: Path) -> None:
         broker,
         {"simulated": SimulatedAgents()},
         [tmp_path / "worktrees"],
+        policy=ExecutionPolicy((tmp_path,)),
         writable_agents=frozenset({"implementer"}),
     )
     restarted = AdversarialLoop(
@@ -524,6 +528,7 @@ def test_commit_captured_before_database_failure_is_recovered(
         broker,
         {"simulated": adapter},
         [tmp_path / "worktrees"],
+        policy=ExecutionPolicy((tmp_path,)),
         writable_agents=frozenset({"implementer"}),
     )
     resumed = AdversarialLoop(

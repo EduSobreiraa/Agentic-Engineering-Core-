@@ -1,0 +1,22 @@
+Fase 6 hardening — 2026-10-18
+
+uv run ruff check .
+All checks passed!
+
+uv run mypy
+Success: no issues found in 67 source files
+
+uv run pytest
+140 items collected; 138 passed, 2 skipped in 10.71s
+The skipped tests are the real Codex scenarios, which are opt-in by default.
+
+AEC_RUN_REAL_CODEX=1 uv run pytest -q tests/scenarios/test_real_codex_opt_in.py
+2 passed in 30.56s
+
+uv run pytest -q tests/scenarios/test_methodology_evolution.py tests/integration/test_multiprocess.py tests/integration/test_methodology_benchmark.py
+19 passed in 5.27s
+
+git diff --check
+Passed.
+
+The multiprocess tests use Python spawn and SQLite on one local POSIX filesystem. The benchmark uses scripted agents in separate local workflows, not real Codex or production code. It does not measure review iterations or prove a causal improvement. The execution trust policy is an admission check, not an OS sandbox. Remote approval authentication is documented but not implemented.

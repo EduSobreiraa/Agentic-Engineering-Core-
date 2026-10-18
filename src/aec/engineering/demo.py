@@ -9,6 +9,7 @@ from pathlib import Path
 from aec.communication.broker import Broker
 from aec.execution.adapters.codex_cli import CodexCliAdapter
 from aec.execution.manager import ExecutionManager
+from aec.execution.policy import ExecutionPolicy
 from aec.security.identities import Role
 
 from .gates import CommandGate
@@ -61,10 +62,12 @@ async def run_demo(root: Path) -> tuple[str, str]:
     implementer = broker.register("implementer", Role.IMPLEMENTER)
     qa = broker.register("qa", Role.QA)
     quality_gate = broker.register("quality-gate", Role.QUALITY_GATE)
+    policy = ExecutionPolicy((repository, worktrees))
     manager = ExecutionManager(
         broker,
-        {"codex": CodexCliAdapter()},
+        {"codex": CodexCliAdapter(policy=policy)},
         [worktrees],
+        policy=policy,
         writable_agents=frozenset({"implementer"}),
     )
     loop = AdversarialLoop(

@@ -21,6 +21,7 @@ from aec.execution.demo import _send, run_demo
 from aec.execution.locking import LocalLock
 from aec.execution.manager import ExecutionManager
 from aec.execution.models import ExecutionRequest, ExecutionResult, ExecutionStatus
+from aec.execution.policy import ExecutionPolicy
 from aec.execution.repository import ExecutionRepository
 from aec.security.identities import Role
 
@@ -60,7 +61,9 @@ def test_resume_keeps_non_git_workspace_allowed(
             "prompt = sys.stdin.read()",
         )
     )
-    adapter = CodexCliAdapter(str(fake_codex))
+    adapter = CodexCliAdapter(
+        str(fake_codex), policy=ExecutionPolicy((tmp_path,))
+    )
     request = ExecutionRequest(
         execution_id="first",
         run_id="run",
@@ -89,7 +92,11 @@ def test_resume_keeps_non_git_workspace_allowed(
 def test_two_agents_exchange_over_acp(fake_codex: Path, tmp_path: Path) -> None:
     database = tmp_path / "aec.sqlite"
     history = asyncio.run(
-        run_demo(database, tmp_path / "work", CodexCliAdapter(str(fake_codex)))
+        run_demo(
+            database,
+            tmp_path / "work",
+            CodexCliAdapter(str(fake_codex), policy=ExecutionPolicy((tmp_path,))),
+        )
     )
     assert [message.type for message in history] == [
         MessageType.TASK_ASSIGNED,
@@ -130,7 +137,11 @@ def test_invalid_qa_output_fails_without_finding(
     database = tmp_path / "aec.sqlite"
     with pytest.raises(RuntimeError, match="QA execution ended"):
         asyncio.run(
-            run_demo(database, tmp_path / "work", CodexCliAdapter(str(fake_codex)))
+            run_demo(
+                database,
+                tmp_path / "work",
+                CodexCliAdapter(str(fake_codex), policy=ExecutionPolicy((tmp_path,))),
+            )
         )
     with Broker(database).db.connect() as db:
         rows = db.execute(
@@ -146,7 +157,9 @@ def test_invalid_qa_output_fails_without_finding(
 
 
 def test_adapter_timeout_and_invalid_json(fake_codex: Path, tmp_path: Path) -> None:
-    adapter = CodexCliAdapter(str(fake_codex))
+    adapter = CodexCliAdapter(
+        str(fake_codex), policy=ExecutionPolicy((tmp_path,))
+    )
     request = ExecutionRequest(
         execution_id="sleep",
         run_id="run",
@@ -202,7 +215,9 @@ def test_parser_extracts_final_message() -> None:
 
 def test_adapter_cancel(fake_codex: Path, tmp_path: Path) -> None:
     async def scenario() -> None:
-        adapter = CodexCliAdapter(str(fake_codex))
+        adapter = CodexCliAdapter(
+            str(fake_codex), policy=ExecutionPolicy((tmp_path,))
+        )
         request = ExecutionRequest(
             execution_id="cancel",
             run_id="run",
@@ -258,9 +273,13 @@ def test_manager_serializes_same_workspace(
     orchestrator = broker.register("orchestrator", Role.ORCHESTRATOR)
     implementer = broker.register("implementer", Role.IMPLEMENTER)
     adapter = CountingAdapter()
-    manager = ExecutionManager(broker, {"fake": adapter}, [tmp_path])
+    manager = ExecutionManager(
+        broker, {"fake": adapter}, [tmp_path], policy=ExecutionPolicy((tmp_path,))
+    )
     other_manager = (
-        ExecutionManager(broker, {"fake": adapter}, [tmp_path])
+        ExecutionManager(
+            broker, {"fake": adapter}, [tmp_path], policy=ExecutionPolicy((tmp_path,))
+        )
         if separate_managers
         else manager
     )
@@ -344,7 +363,9 @@ def test_restarting_manager_does_not_interrupt_active_execution(tmp_path: Path) 
         "task",
     )
     adapter = PausingAdapter()
-    manager = ExecutionManager(broker, {"fake": adapter}, [tmp_path])
+    manager = ExecutionManager(
+        broker, {"fake": adapter}, [tmp_path], policy=ExecutionPolicy((tmp_path,))
+    )
     request = ExecutionRequest(
         execution_id="active",
         run_id="run",
@@ -360,7 +381,9 @@ def test_restarting_manager_does_not_interrupt_active_execution(tmp_path: Path) 
             manager.execute(request, implementer, message.message_id)
         )
         await adapter.started.wait()
-        restarted = ExecutionManager(broker, {"fake": adapter}, [tmp_path])
+        restarted = ExecutionManager(
+            broker, {"fake": adapter}, [tmp_path], policy=ExecutionPolicy((tmp_path,))
+        )
         assert restarted.repository.get("active") == ExecutionStatus.RUNNING
         adapter.release.set()
         assert (await task).status == ExecutionStatus.SUCCEEDED
@@ -420,7 +443,10 @@ def test_workspace_write_requires_manager_grant(tmp_path: Path) -> None:
         sandbox_mode="workspace-write",
     )
     manager = ExecutionManager(
-        broker, {"codex": CodexCliAdapter("/bin/false")}, [tmp_path]
+        broker,
+        {"codex": CodexCliAdapter("/bin/false", policy=ExecutionPolicy((tmp_path,)))},
+        [tmp_path],
+        policy=ExecutionPolicy((tmp_path,)),
     )
     with pytest.raises(PermissionError, match="workspace-write"):
         asyncio.run(manager.execute(request, implementer, message.message_id))
@@ -437,8 +463,9 @@ def test_workspace_write_requires_manager_grant(tmp_path: Path) -> None:
     assert manager.repository.get("write") is None
     granted = ExecutionManager(
         broker,
-        {"codex": CodexCliAdapter("/bin/false")},
+        {"codex": CodexCliAdapter("/bin/false", policy=ExecutionPolicy((tmp_path,)))},
         [tmp_path],
+        policy=ExecutionPolicy((tmp_path,)),
         writable_agents=frozenset({"implementer"}),
     )
     with pytest.raises(PermissionError, match="workspace-write"):
@@ -456,3 +483,63 @@ def test_workspace_write_requires_manager_grant(tmp_path: Path) -> None:
     result = asyncio.run(granted.execute(request, implementer, permitted.message_id))
     assert result.status == ExecutionStatus.FAILED
     assert granted.repository.get("write") == result
+
+
+def test_untrusted_project_cannot_start_adapter(tmp_path: Path) -> None:
+    trusted = tmp_path / "trusted"
+    untrusted = tmp_path / "untrusted"
+    trusted.mkdir()
+    untrusted.mkdir()
+    policy = ExecutionPolicy((trusted,))
+    broker = Broker(tmp_path / "aec.sqlite")
+    orchestrator = broker.register("orchestrator", Role.ORCHESTRATOR)
+    implementer = broker.register("implementer", Role.IMPLEMENTER)
+    assignment = _send(
+        broker,
+        orchestrator,
+        implementer,
+        MessageType.TASK_ASSIGNED,
+        {"title": "task", "instructions": "done"},
+        "run",
+        "task",
+    )
+    claimed_trust = broker.publish(
+        assignment.model_copy(
+            update={"message_id": "claimed-trust", "metadata": {"trusted": True}}
+        ),
+        orchestrator,
+    )
+    request = ExecutionRequest(
+        execution_id="untrusted",
+        run_id="run",
+        task_id="task",
+        agent_id="implementer",
+        executor="codex",
+        prompt="done",
+        working_directory=untrusted,
+        metadata={"trusted": True},
+    )
+    adapter = CodexCliAdapter("/bin/false", policy=policy)
+    manager = ExecutionManager(
+        broker, {"codex": adapter}, [tmp_path], policy=policy
+    )
+    with pytest.raises(PermissionError, match="not trusted"):
+        asyncio.run(manager.execute(request, implementer, claimed_trust.message_id))
+    with pytest.raises(PermissionError, match="not trusted"):
+        asyncio.run(adapter.execute(request))
+    assert manager.repository.get(request.execution_id) is None
+
+
+def test_trust_policy_rejects_broad_roots_and_symlink_escape(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="specific trusted"):
+        ExecutionPolicy((Path("/"),))
+    with pytest.raises(ValueError, match="specific trusted"):
+        ExecutionPolicy((Path.home(),))
+    trusted = tmp_path / "trusted"
+    outside = tmp_path / "outside"
+    trusted.mkdir()
+    outside.mkdir()
+    (trusted / "escape").symlink_to(outside, target_is_directory=True)
+    policy = ExecutionPolicy((trusted,))
+    with pytest.raises(PermissionError, match="not trusted"):
+        policy.require(trusted / "escape")

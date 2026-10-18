@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import sqlite3
 from datetime import datetime, timezone
@@ -10,6 +11,7 @@ from pydantic import ValidationError
 from aec.communication.broker import Broker
 from aec.communication.schemas import ArtifactRef, Message, MessageType, TaskAssigned
 from aec.documentation.worker import DocumentationWorker
+from aec.methodology.benchmark import LocalBenchmarkRunner
 from aec.methodology.contracts import BenchmarkCase, MethodologyVersion
 from aec.methodology.governance import (
     MethodologyEvaluator,
@@ -179,6 +181,7 @@ def test_supervised_evolution(tmp_path: object) -> None:
         "1.0.0",
         proposal_id="RFC-METHOD-001",
         proposed_version="1.1.0",
+        expected_metric="acceptance_rate",
     )
     assert finding.evidence_refs == ("run-021", "run-025")
     broker = Broker(directory / "aec.sqlite")
@@ -259,18 +262,21 @@ def test_supervised_evolution(tmp_path: object) -> None:
         .verdict
         == "FAIL"
     )
-    evaluation = MethodologyEvaluator(store, registry).evaluate(
-        proposal.proposal_id,
-        cases=(CASE_A, CASE_B),
-        benchmark=fixture_benchmark,
+    evaluation = asyncio.run(
+        MethodologyEvaluator(store, registry).evaluate_controlled(
+            proposal.proposal_id, LocalBenchmarkRunner(directory / "benchmarks")
+        )
     )
-    assert evaluation.verdict == "PASS"
-    assert (evaluation.baseline, evaluation.candidate) == (2.5, 1.5)
-    assert [pair.task_id for pair in evaluation.pairs] == ["fixture-a", "fixture-b"]
+    assert evaluation.verdict == "PASS_WITH_WARNINGS"
+    assert (evaluation.baseline, evaluation.candidate) == (0.5, 1.0)
+    assert [pair.task_id for pair in evaluation.pairs] == [
+        "valid-types-1",
+        "invalid-types-1",
+    ]
     evaluation_id = documentation.create_methodology_document(
         proposal.proposal_id, "evaluation"
     )
-    assert "PASS" in documentation.get_document(evaluation_id)
+    assert "PASS\\_WITH\\_WARNINGS" in documentation.get_document(evaluation_id)
     with pytest.raises(PermissionError):
         governance.decide(proposal.proposal_id, "methodology-worker", "APPROVED")
     approval = governance.decide(proposal.proposal_id, "human-test", "APPROVED")
@@ -311,7 +317,7 @@ def test_supervised_evolution(tmp_path: object) -> None:
         "DRAFT",
         "SUBMITTED",
         "UNDER_EVALUATION",
-        "PASS",
+        "PASS_WITH_WARNINGS",
         "APPROVED",
         "PUBLISHED",
     ]
@@ -448,6 +454,8 @@ def test_inconclusive_and_duplicate(tmp_path: object) -> None:
         cases=(CASE_A,),
         benchmark=fixture_benchmark,
     )
+    with pytest.raises(ValueError, match="executed evaluation"):
+        governance.decide(revision.proposal_id, "human-test", "APPROVED")
     governance.decide(revision.proposal_id, "human-test", "CHANGES_REQUESTED")
     with pytest.raises(ValueError, match="not awaiting approval"):
         governance.decide(revision.proposal_id, "human-test", "APPROVED")
@@ -456,7 +464,8 @@ def test_inconclusive_and_duplicate(tmp_path: object) -> None:
 def test_publication_failure_can_retry(tmp_path: object) -> None:
     from pathlib import Path
 
-    db = Database(Path(str(tmp_path)) / "aec.sqlite")
+    directory = Path(str(tmp_path))
+    db = Database(directory / "aec.sqlite")
     registry = MethodologyRegistry(db)
     registry.seed(base_version(), actor="bootstrap")
     history(db, "run-021")
@@ -467,11 +476,12 @@ def test_publication_failure_can_retry(tmp_path: object) -> None:
         "1.0.0",
         proposal_id="RFC-METHOD-001",
         proposed_version="1.1.0",
+        expected_metric="acceptance_rate",
     )
-    MethodologyEvaluator(store, registry).evaluate(
-        proposal.proposal_id,
-        cases=(CASE_A,),
-        benchmark=fixture_benchmark,
+    asyncio.run(
+        MethodologyEvaluator(store, registry).evaluate_controlled(
+            proposal.proposal_id, LocalBenchmarkRunner(directory / "benchmarks")
+        )
     )
     governance = MethodologyGovernance(
         store, registry, local_approvers=frozenset({"human-test"})
@@ -491,11 +501,12 @@ def test_publication_failure_can_retry(tmp_path: object) -> None:
         "1.0.0",
         proposal_id="RFC-METHOD-002",
         proposed_version="1.2.0",
+        expected_metric="acceptance_rate",
     )
-    MethodologyEvaluator(store, configured).evaluate(
-        stale.proposal_id,
-        cases=(CASE_A,),
-        benchmark=fixture_benchmark,
+    asyncio.run(
+        MethodologyEvaluator(store, configured).evaluate_controlled(
+            stale.proposal_id, LocalBenchmarkRunner(directory / "benchmarks")
+        )
     )
     second = MethodologyGovernance(
         store, configured, local_approvers=frozenset({"human-test"})

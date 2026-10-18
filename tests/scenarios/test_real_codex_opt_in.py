@@ -10,6 +10,7 @@ from aec.communication.schemas import MessageType
 from aec.execution.adapters.codex_cli import CodexCliAdapter
 from aec.execution.demo import run_demo
 from aec.execution.models import ExecutionRequest, ExecutionStatus
+from aec.execution.policy import ExecutionPolicy
 
 
 @pytest.mark.skipif(
@@ -31,7 +32,7 @@ def test_real_two_agent_exchange(tmp_path: Path) -> None:
     reason="set AEC_RUN_REAL_CODEX=1 to consume two real Codex turns",
 )
 def test_real_session_resume_in_non_git_directory(tmp_path: Path) -> None:
-    adapter = CodexCliAdapter()
+    adapter = CodexCliAdapter(policy=ExecutionPolicy((tmp_path,)))
 
     async def run() -> None:
         first_request = ExecutionRequest(

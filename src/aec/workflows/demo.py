@@ -13,6 +13,7 @@ from aec.execution.adapters.codex_cli import CodexCliAdapter
 from aec.execution.base import ExecutionAdapter
 from aec.execution.manager import ExecutionManager
 from aec.execution.models import ExecutionRequest, ExecutionResult, ExecutionStatus
+from aec.execution.policy import ExecutionPolicy
 from aec.security.identities import Role
 
 from .engine import WorkflowEngine
@@ -97,8 +98,13 @@ async def run_demo(
         for name in ("analyst", "implementer")
     }
     executor = "codex" if real_codex else "simulated"
-    adapter: ExecutionAdapter = CodexCliAdapter() if real_codex else SimulatedAdapter()
-    manager = ExecutionManager(broker, {executor: adapter}, [workspace])
+    policy = ExecutionPolicy((workspace,))
+    adapter: ExecutionAdapter = (
+        CodexCliAdapter(policy=policy) if real_codex else SimulatedAdapter()
+    )
+    manager = ExecutionManager(
+        broker, {executor: adapter}, [workspace], policy=policy
+    )
     engine = WorkflowEngine(
         broker,
         manager,

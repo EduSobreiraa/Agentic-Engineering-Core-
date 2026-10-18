@@ -28,6 +28,7 @@ from aec.documentation.worker import (
 )
 from aec.execution.manager import ExecutionManager
 from aec.execution.models import ExecutionResult, ExecutionStatus
+from aec.execution.policy import ExecutionPolicy
 from aec.security.identities import Identity, Role
 from aec.workflows.engine import WorkflowEngine
 from aec.workflows.models import WorkflowDefinition, WorkflowStatus, WorkflowStep
@@ -450,7 +451,9 @@ def test_workflow_hook_and_failed_state(tmp_path: Path) -> None:
     validator = workflow_documentation_validator(broker, ids[Role.ORCHESTRATOR], worker)
     engine = WorkflowEngine(
         broker,
-        ExecutionManager(broker, {}, [tmp_path]),
+        ExecutionManager(
+            broker, {}, [tmp_path], policy=ExecutionPolicy((tmp_path,))
+        ),
         ids[Role.ORCHESTRATOR],
         {},
         ids[Role.QUALITY_GATE],

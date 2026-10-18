@@ -78,6 +78,8 @@ class AdversarialLoop:
         self.quality_gate = quality_gate
         self.repository = repository.resolve(strict=True)
         self.worktree_root = worktree_root.resolve()
+        self.manager.policy.require(self.repository)
+        self.manager.policy.require(self.worktree_root)
         if (
             self.worktree_root == self.repository
             or self.repository in self.worktree_root.parents
@@ -551,6 +553,7 @@ class AdversarialLoop:
                                     for gate in self.gates
                                     if gate.gate_id in self.pre_qa_gate_ids
                                 ),
+                                policy=self.manager.policy,
                             )
                             self._publish_gates(
                                 run_id,
@@ -654,6 +657,7 @@ class AdversarialLoop:
                             for gate in self.gates
                             if gate.gate_id not in self.pre_qa_gate_ids
                         ),
+                        policy=self.manager.policy,
                     )
                     if self.pre_qa_gate_ids:
                         gates = [

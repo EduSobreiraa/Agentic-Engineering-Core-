@@ -5,15 +5,16 @@ from __future__ import annotations
 import hashlib
 import sqlite3
 from datetime import datetime, timezone
-from typing import Callable, Literal
+from typing import TYPE_CHECKING, Callable, Literal
 
 from aec.persistence.database import Database
 from aec.workflows.loader import definition_hash, validate
-from aec.workflows.models import WorkflowDefinition, WorkflowStep
+from aec.workflows.models import Condition, WorkflowDefinition, WorkflowStep
 
 from .contracts import (
     BenchmarkCase,
     BenchmarkPair,
+    BenchmarkRun,
     EvaluationVerdict,
     MethodologyApproval,
     MethodologyEvaluation,
@@ -22,6 +23,9 @@ from .contracts import (
     MethodologyVersion,
     ProposalStatus,
 )
+
+if TYPE_CHECKING:
+    from .benchmark import LocalBenchmarkRunner
 
 
 def now() -> datetime:
@@ -259,8 +263,13 @@ def candidate(
         if not qa_steps:
             raise ValueError("QA step does not exist")
         for qa in qa_steps:
+            if qa.condition is not None:
+                raise ValueError("QA already has a condition")
             steps[steps.index(qa)] = qa.model_copy(
-                update={"depends_on": [*qa.depends_on, change.gate]}
+                update={
+                    "depends_on": [*qa.depends_on, change.gate],
+                    "condition": Condition(step=change.gate, result_equals=True),
+                }
             )
         steps.append(
             WorkflowStep(
@@ -293,13 +302,7 @@ class MethodologyEvaluator:
         self.store = store
         self.registry = registry
 
-    def evaluate(
-        self,
-        proposal_id: str,
-        *,
-        cases: tuple[BenchmarkCase, ...] = (),
-        benchmark: Callable[[WorkflowDefinition, BenchmarkCase], float] | None = None,
-    ) -> MethodologyEvaluation:
+    def _begin(self, proposal_id: str) -> tuple[MethodologyProposal, str]:
         proposal, status, sha = self.store.get(proposal_id)
         if status not in {ProposalStatus.SUBMITTED, ProposalStatus.UNDER_EVALUATION}:
             raise ValueError("proposal cannot be evaluated in this state")
@@ -311,6 +314,41 @@ class MethodologyEvaluator:
                     (ProposalStatus.UNDER_EVALUATION, proposal_id),
                 )
                 _event(db, proposal_id, "UNDER_EVALUATION")
+        return proposal, sha
+
+    def _finish(self, result: MethodologyEvaluation) -> MethodologyEvaluation:
+        with self.store.db.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            updated = db.execute(
+                "UPDATE methodology_proposals SET status=?,evaluation=? "
+                "WHERE proposal_id=? AND status=?",
+                (
+                    ProposalStatus.EVALUATION_FAILED
+                    if result.verdict == EvaluationVerdict.FAIL
+                    else ProposalStatus.AWAITING_APPROVAL,
+                    result.model_dump_json(),
+                    result.proposal_id,
+                    ProposalStatus.UNDER_EVALUATION,
+                ),
+            )
+            if updated.rowcount != 1:
+                raise ValueError("proposal state changed during evaluation")
+            _event(
+                db,
+                result.proposal_id,
+                result.verdict.value,
+                detail=result.model_dump_json(),
+            )
+        return result
+
+    def evaluate(
+        self,
+        proposal_id: str,
+        *,
+        cases: tuple[BenchmarkCase, ...] = (),
+        benchmark: Callable[[WorkflowDefinition, BenchmarkCase], float] | None = None,
+    ) -> MethodologyEvaluation:
+        proposal, sha = self._begin(proposal_id)
         measured: tuple[BenchmarkPair, ...] = ()
         try:
             base = self.registry.get(proposal.methodology_id, proposal.base_version)
@@ -366,22 +404,142 @@ class MethodologyEvaluator:
             if measured
             else None,
         )
-        with self.store.db.connect() as db:
-            db.execute("BEGIN IMMEDIATE")
-            db.execute(
-                "UPDATE methodology_proposals SET status=?,evaluation=? "
-                "WHERE proposal_id=? AND status=?",
-                (
-                    ProposalStatus.EVALUATION_FAILED
-                    if verdict == EvaluationVerdict.FAIL
-                    else ProposalStatus.AWAITING_APPROVAL,
-                    result.model_dump_json(),
-                    proposal_id,
-                    ProposalStatus.UNDER_EVALUATION,
-                ),
+        return self._finish(result)
+
+    async def evaluate_controlled(
+        self, proposal_id: str, runner: LocalBenchmarkRunner
+    ) -> MethodologyEvaluation:
+        proposal, sha = self._begin(proposal_id)
+        runs: tuple[BenchmarkRun, ...] = ()
+        pairs: tuple[BenchmarkPair, ...] = ()
+        checks: tuple[str, ...] = ()
+        limitations = (
+            "Scripted local adapter; the comparison is exploratory, not causal proof.",
+            "The generic workflow does not measure review iterations or rework.",
+        )
+        try:
+            base = self.registry.get(proposal.methodology_id, proposal.base_version)
+            proposed = candidate(base, proposal)
+            if proposal.proposed_version in self.registry.versions(
+                proposal.methodology_id
+            ):
+                raise ValueError("proposed version is already published")
+        except Exception as exc:
+            verdict = EvaluationVerdict.FAIL
+            checks = (f"{type(exc).__name__}: {exc}",)
+        else:
+            try:
+                runs = await runner.compare(base, proposed)
+                pairs = self._controlled_pairs(runs, proposal.expected_metric)
+                if any(run.failure for run in runs):
+                    verdict = EvaluationVerdict.INCONCLUSIVE
+                    checks = ("benchmark runner failed",)
+                elif any(
+                    before.accepted and not after.accepted
+                    for before, after in self._paired_runs(runs)
+                ):
+                    verdict = EvaluationVerdict.FAIL
+                    checks = ("candidate regressed on an accepted task",)
+                elif not pairs:
+                    verdict = EvaluationVerdict.INCONCLUSIVE
+                    checks = (f"metric unavailable: {proposal.expected_metric}",)
+                else:
+                    before_mean = sum(pair.baseline for pair in pairs) / len(pairs)
+                    after_mean = sum(pair.candidate for pair in pairs) / len(pairs)
+                    improved = (
+                        after_mean < before_mean
+                        if proposal.expected_direction == "decrease"
+                        else after_mean > before_mean
+                    )
+                    verdict = (
+                        EvaluationVerdict.PASS_WITH_WARNINGS
+                        if improved
+                        else EvaluationVerdict.FAIL
+                    )
+                    checks = (f"paired mean: {before_mean} -> {after_mean}",)
+            except Exception as exc:
+                verdict = EvaluationVerdict.INCONCLUSIVE
+                checks = (f"benchmark error: {type(exc).__name__}: {exc}",)
+        result = MethodologyEvaluation(
+            evaluation_id=f"eval:{proposal_id}",
+            proposal_id=proposal_id,
+            proposal_sha256=sha,
+            verdict=verdict,
+            checks=checks,
+            limitations=limitations,
+            pairs=pairs,
+            evidence_kind="EXECUTED",
+            benchmark_runs=runs,
+            baseline=sum(pair.baseline for pair in pairs) / len(pairs)
+            if pairs
+            else None,
+            candidate=sum(pair.candidate for pair in pairs) / len(pairs)
+            if pairs
+            else None,
+        )
+        return self._finish(result)
+
+    @staticmethod
+    def _paired_runs(
+        runs: tuple[BenchmarkRun, ...],
+    ) -> list[tuple[BenchmarkRun, BenchmarkRun]]:
+        grouped: dict[tuple[str, int], dict[str, BenchmarkRun]] = {}
+        for run in runs:
+            group = grouped.setdefault((run.task_id, run.repetition), {})
+            if run.arm in group:
+                raise ValueError("duplicate benchmark arm")
+            group[run.arm] = run
+        if not grouped or any(
+            set(group) != {"baseline", "candidate"} for group in grouped.values()
+        ):
+            raise ValueError("incomplete benchmark pairs")
+        paired = []
+        for group in grouped.values():
+            before, after = group["baseline"], group["candidate"]
+            if (
+                before.acceptance_sha256 != after.acceptance_sha256
+                or before.conditions_sha256 != after.conditions_sha256
+            ):
+                raise ValueError("benchmark conditions or criteria differ")
+            paired.append((before, after))
+        return paired
+
+    @classmethod
+    def _controlled_pairs(
+        cls, runs: tuple[BenchmarkRun, ...], metric: str
+    ) -> tuple[BenchmarkPair, ...]:
+        if metric not in {
+            "acceptance_rate",
+            "agent_invocation_count",
+            "duration_seconds",
+        }:
+            return ()
+        pairs = []
+        for before, after in cls._paired_runs(runs):
+            if metric != "acceptance_rate" and (
+                not before.accepted or not after.accepted
+            ):
+                return ()
+            baseline = (
+                float(before.accepted)
+                if metric == "acceptance_rate"
+                else float(getattr(before, metric))
             )
-            _event(db, proposal_id, verdict.value, detail=result.model_dump_json())
-        return result
+            candidate_value = (
+                float(after.accepted)
+                if metric == "acceptance_rate"
+                else float(getattr(after, metric))
+            )
+            pairs.append(
+                BenchmarkPair(
+                    task_id=f"{before.task_id}-{before.repetition}",
+                    acceptance_sha256=before.acceptance_sha256,
+                    conditions=f"sha256:{before.conditions_sha256}",
+                    baseline=baseline,
+                    candidate=candidate_value,
+                )
+            )
+        return tuple(pairs)
 
 
 class MethodologyGovernance:
@@ -416,12 +574,13 @@ class MethodologyGovernance:
                 "SELECT evaluation FROM methodology_proposals WHERE proposal_id=?",
                 (proposal_id,),
             ).fetchone()["evaluation"]
-            verdict = MethodologyEvaluation.model_validate_json(evaluation).verdict
-            if decision == "APPROVED" and verdict not in {
-                EvaluationVerdict.PASS,
-                EvaluationVerdict.PASS_WITH_WARNINGS,
-            }:
-                raise ValueError("evaluation does not authorize approval")
+            assessment = MethodologyEvaluation.model_validate_json(evaluation)
+            if decision == "APPROVED" and (
+                assessment.evidence_kind != "EXECUTED"
+                or assessment.verdict
+                not in {EvaluationVerdict.PASS, EvaluationVerdict.PASS_WITH_WARNINGS}
+            ):
+                raise ValueError("executed evaluation required for approval")
             result = db.execute(
                 "UPDATE methodology_proposals SET status=?,approval_by=?,approval_at=? "
                 "WHERE proposal_id=? AND status=? AND sha256=?",
@@ -480,10 +639,12 @@ class MethodologyGovernance:
             ):
                 raise PermissionError("current proposal has no valid approval")
             evaluation = MethodologyEvaluation.model_validate_json(row["evaluation"])
-            if evaluation.proposal_sha256 != sha or evaluation.verdict not in {
-                EvaluationVerdict.PASS,
-                EvaluationVerdict.PASS_WITH_WARNINGS,
-            }:
+            if (
+                evaluation.proposal_sha256 != sha
+                or evaluation.evidence_kind != "EXECUTED"
+                or evaluation.verdict
+                not in {EvaluationVerdict.PASS, EvaluationVerdict.PASS_WITH_WARNINGS}
+            ):
                 raise PermissionError("evaluation does not permit publication")
             active = db.execute(
                 "SELECT version FROM methodology_active WHERE methodology_id=?",
