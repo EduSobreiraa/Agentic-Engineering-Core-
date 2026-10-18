@@ -1,6 +1,6 @@
 # Componentes e responsabilidades
 
-Este documento descreve os limites dos componentes. ACP, Execution Layer, Workflow Engine, aprovação local e ciclo adversarial simulado possuem implementação; o Control Plane geral e a governança distribuída ainda são alvo futuro.
+Este documento descreve os limites dos componentes. ACP, Execution Layer, Workflow Engine, aprovação local, ciclo adversarial simulado e Worker de Documentação possuem implementação; o Control Plane geral e a governança distribuída ainda são alvo futuro.
 
 | Componente | Responsabilidade | Entrada e saída esperadas | Fora de sua autoridade |
 | --- | --- | --- | --- |
@@ -10,12 +10,13 @@ Este documento descreve os limites dos componentes. ACP, Execution Layer, Workfl
 | Methodology Engine | Carregar definições declarativas, aplicar transições e fixar versão por execução | Definição publicada e estado; próximo passo permitido | Publicar a própria definição |
 | Governance Layer | Aplicar políticas, registrar aprovações e bloquear ações críticas sem autorização | Identidade, ação, contexto e decisão humana; autorização verificável | Aceitar afirmação de agente como aprovação |
 | Quality Gate | Rodar verificações objetivas e registrar evidências | Artefatos e critérios; resultado e evidência | Substituir julgamento humano onde ele é exigido |
+| Worker de Documentação | Consolidar registros tipados em relatórios e revisões de ADR | Pedido ACP, eventos e artefatos; Markdown, hash e referências | Aprovar engenharia, alterar políticas ou publicar metodologias |
 | Persistence Layer | Persistir tarefas, mensagens, estados, aprovações e referências | Operações transacionais; dados recuperáveis | Decidir política ou interpretar conteúdo de agente |
 
 ## Papéis de agentes
 
-O Orquestrador acompanha uma execução dentro das permissões do sistema. O Implementador produz código e correções em worktree autorizada. O QA adversarial aponta falhas com evidências em snapshot separado. Esses três papéis são usados pelo ciclo da Fase 4. O Worker de Documentação e o Worker de Metodologia permanecem planejados; só uma aprovação humana permite publicar nova metodologia.
+O Orquestrador acompanha uma execução dentro das permissões do sistema. O Implementador produz código e correções em worktree autorizada. O QA adversarial aponta falhas com evidências em snapshot separado. Esses três papéis são usados pelo ciclo da Fase 4. O Worker de Documentação gera relatórios determinísticos na Fase 5. O Worker de Metodologia permanece planejado; só uma aprovação humana permite publicar nova metodologia.
 
 ## Dependências entre componentes
 
-O ACP depende apenas de seus contratos e da persistência local. A Execution Layer implementa uma interface de executor com Codex CLI como primeiro adapter. O Workflow Engine coordena DAGs; `AdversarialLoop` persiste iterações e reutiliza seus passos. A aprovação humana usa a infraestrutura local do Workflow Engine. Os gates da Fase 4 usam comandos registrados pelo projeto. Ollama e seleção geral de metodologias permanecem futuras.
+O ACP depende apenas de seus contratos e da persistência local. A Execution Layer implementa uma interface de executor com Codex CLI como primeiro adapter. O Workflow Engine coordena DAGs; `AdversarialLoop` persiste iterações e reutiliza seus passos. A aprovação humana usa a infraestrutura local do Workflow Engine. Os gates da Fase 4 usam comandos registrados pelo projeto. O Worker de Documentação lê as evidências dessas camadas e pode ser acionado por um validador registrado no Workflow Engine. Ollama e seleção geral de metodologias permanecem futuras.

@@ -135,6 +135,7 @@ class DocumentationResult(Contract):
 class DocumentationFailure(Contract):
     request_message_id: Annotated[str, Field(min_length=1)]
     reason: Annotated[str, Field(min_length=1)]
+    validation_status: Literal["INVALID"] = "INVALID"
 
 
 Payload = (

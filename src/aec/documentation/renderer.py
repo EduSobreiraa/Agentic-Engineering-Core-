@@ -51,11 +51,6 @@ def execution_report(
     for item in evidence.iterations:
         implementation = item.implementation
         review = item.review
-        findings = (
-            ", ".join(safe(f.finding_id) for f in review.findings)
-            if review
-            else "indisponível"
-        )
         gates = (
             ", ".join(f"{safe(g.gate_id)}={g.status}" for g in item.gates)
             or "não executados"
@@ -91,12 +86,27 @@ def execution_report(
         )
         if implementation:
             approval = (
-                safe(evidence.approvals[0][1]) if evidence.approvals else "indisponível"
+                "APPROVED"
+                if evidence.status == "APPROVED"
+                and implementation.result_commit == evidence.head_commit
+                and any(
+                    status == "APPROVED" and actor
+                    for _, status, actor in evidence.approvals
+                )
+                else "indisponível"
             )
             for path in implementation.changed_files:
+                file_findings = (
+                    ", ".join(
+                        safe(finding.finding_id)
+                        for finding in review.findings
+                        if finding.file == path
+                    )
+                    if review else ""
+                ) or "indisponível"
                 trace.append(
                     f"| {safe(evidence.task_id)} | {item.number} | {commit} | "
-                    f"{safe(path)} | {findings} | {gates} | "
+                    f"{safe(path)} | {file_findings} | {gates} | "
                     f"{approval} | {safe(document_id)} |"
                 )
     approvals = (
@@ -126,12 +136,27 @@ def execution_report(
             ),
             "document_id": safe(document_id),
             "agents": ", ".join(safe(agent) for agent in all_agents) or "indisponível",
+            "executions": "\n".join(
+                f"| {safe(item.execution_id)} | {safe(item.agent_id)} | "
+                f"{safe(item.status)} | "
+                f"{item.exit_code if item.exit_code is not None else 'indisponível'} |"
+                for item in evidence.executions
+            ) or "| indisponível | | | |",
+            "state_history": "\n".join(
+                f"| {safe(item.run_id)} | {safe(item.step_id or 'workflow')} | "
+                f"{safe(item.kind)} | {safe(item.created_at)} |"
+                for item in evidence.workflow_events
+            ) or "| indisponível | | | |",
             "findings": "\n".join(findings_detail) or "- nenhum finding registrado",
             "gate_rows": "\n".join(gate_rows)
             or "| indisponível | | não executado | | |",
             "iterations": "\n".join(iterations) or "| indisponível | | | | |",
             "trace": "\n".join(trace) or "| indisponível | | | | | | | |",
             "approvals": approvals,
+            "adrs": "\n".join(
+                f"- {safe(adr_id)} revisão {revision}: {safe(status)}, sha256 {digest}"
+                for adr_id, revision, status, digest in evidence.adrs
+            ) or "- nenhuma registrada",
             "artifacts": "\n".join(f"- {safe(ref)}" for ref in refs)
             or "- nenhum registrado",
             "warnings": "\n".join(f"- {safe(w)}" for w in evidence.warnings)

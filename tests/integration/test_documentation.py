@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
+import sqlite3
 from datetime import date, datetime, timezone
 from pathlib import Path
 
@@ -11,25 +13,38 @@ from aec.communication.broker import Broker
 from aec.communication.schemas import (
     ArtifactRef,
     ArtifactSubmitted,
+    DocumentationFailure,
     DocumentationResult,
     Message,
     MessageType,
 )
-from aec.documentation.adr import ADR, render_adr
+from aec.documentation.adr import ADR, get_adr, record_adr, render_adr
+from aec.documentation.collector import DocumentationCollector
 from aec.documentation.renderer import execution_report, technical_documentation
 from aec.documentation.worker import (
     DocumentationWorker,
     request_documentation,
     workflow_documentation_validator,
 )
+from aec.execution.manager import ExecutionManager
+from aec.execution.models import ExecutionResult, ExecutionStatus
 from aec.security.identities import Identity, Role
+from aec.workflows.engine import WorkflowEngine
+from aec.workflows.models import WorkflowDefinition, WorkflowStatus, WorkflowStep
+from aec.workflows.repository import WorkflowRepository
 
 
 def seed(tmp_path: Path) -> tuple[Broker, dict[Role, Identity], ArtifactRef]:
     broker = Broker(tmp_path / "aec.sqlite", lease_seconds=1)
     ids = {
         role: broker.register(role.value, role)
-        for role in (Role.ORCHESTRATOR, Role.DOCUMENTATION, Role.IMPLEMENTER, Role.QA)
+        for role in (
+            Role.ORCHESTRATOR,
+            Role.DOCUMENTATION,
+            Role.IMPLEMENTER,
+            Role.QA,
+            Role.QUALITY_GATE,
+        )
     }
     content = b"implementation evidence"
     artifact_id = "impl-evidence"
@@ -68,7 +83,7 @@ def seed(tmp_path: Path) -> tuple[Broker, dict[Role, Identity], ArtifactRef]:
         "status": "SUCCEEDED",
         "base_commit": "a" * 40,
         "result_commit": "b" * 40,
-        "changed_files": ["src/module.py"],
+        "changed_files": ["src/module.py", "src/other.py"],
         "artifact_refs": [ref.model_dump(mode="json")],
         "test_results": ["agent claimed success"],
         "implementation_summary": "first attempt",
@@ -92,6 +107,7 @@ def seed(tmp_path: Path) -> tuple[Broker, dict[Role, Identity], ArtifactRef]:
                 "category": "bug",
                 "title": "broken",
                 "description": "unsafe behavior",
+                "file": "src/module.py",
                 "status": "REPRODUCED",
                 "reproduction_steps": ["run example"],
             }
@@ -112,6 +128,17 @@ def seed(tmp_path: Path) -> tuple[Broker, dict[Role, Identity], ArtifactRef]:
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "evidence": "1 passed",
     }
+    moment = datetime.now(timezone.utc)
+    execution = ExecutionResult(
+        execution_id="exec-implement-1",
+        agent_id=ids[Role.IMPLEMENTER].agent_id,
+        status=ExecutionStatus.SUCCEEDED,
+        output="agent claimed success",
+        exit_code=0,
+        started_at=moment,
+        finished_at=moment,
+        artifact_refs=[ref],
+    )
     with broker.db.connect() as db:
         db.execute(
             "INSERT INTO engineering_runs "
@@ -189,6 +216,20 @@ def seed(tmp_path: Path) -> tuple[Broker, dict[Role, Identity], ArtifactRef]:
                 datetime.now(timezone.utc).isoformat(),
             ),
         )
+        db.execute(
+            "INSERT INTO executions VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                execution.execution_id, "run-1-i1-implement", "implement",
+                execution.agent_id, "simulated", str(tmp_path), "assignment-1",
+                "request-hash", execution.status.value, execution.model_dump_json(),
+                moment.isoformat(), moment.isoformat(),
+            ),
+        )
+        db.execute(
+            "INSERT INTO workflow_events(run_id,step_id,kind,detail,created_at) "
+            "VALUES (?,?,?,?,?)",
+            ("run-1-i1-implement", "implement", "SUCCEEDED", None, moment.isoformat()),
+        )
     return broker, ids, ref
 
 
@@ -209,6 +250,11 @@ def test_report_acp_traceability_recovery_and_immutability(tmp_path: Path) -> No
     report = worker.get_document(result.document_id)
     assert "F-1" in report and "unsafe behavior" in report
     assert "c" * 40 in report and "human" in report and "pytest" in report
+    assert "exec-implement-1" in report and "SUCCEEDED" in report
+    rows = [line for line in report.splitlines() if line.startswith("| task-1 |")]
+    assert any("src/module.py | F-1" in row for row in rows)
+    assert all("src/other.py | F-1" not in row for row in rows)
+    assert all("indisponível" in row for row in rows if "| 1 |" in row)
     assert "agent claimed success" not in report
     published = broker.get_message(
         f"documentation:{request.message_id}:DOCUMENTATION_GENERATED"
@@ -234,6 +280,12 @@ def test_report_acp_traceability_recovery_and_immutability(tmp_path: Path) -> No
             db.execute("SELECT count(*) FROM documentation_records").fetchone()[0] == 1
         )
         db.execute("UPDATE engineering_runs SET status='BLOCKED' WHERE run_id='run-1'")
+        with pytest.raises(sqlite3.IntegrityError, match="immutable"):
+            db.execute(
+                "UPDATE documentation_records SET content='tampered' "
+                "WHERE document_id=?",
+                (result.document_id,),
+            )
     assert worker.get_document(result.document_id) == report
     doc_path = (
         tmp_path
@@ -255,10 +307,12 @@ def test_missing_run_fails_without_document_and_bad_scope_is_rejected(
     worker = DocumentationWorker(broker, identity)
     request = request_documentation(broker, orchestrator, identity, "missing", "task")
     assert worker.process_next() is None
-    assert (
-        broker.get_message(f"documentation:{request.message_id}:DOCUMENTATION_FAILED")
-        is not None
+    failed = broker.get_message(
+        f"documentation:{request.message_id}:DOCUMENTATION_FAILED"
     )
+    assert failed is not None
+    assert isinstance(failed.payload, DocumentationFailure)
+    assert failed.payload.validation_status == "INVALID"
     with broker.db.connect() as db:
         assert (
             db.execute("SELECT count(*) FROM documentation_records").fetchone()[0] == 0
@@ -266,7 +320,7 @@ def test_missing_run_fails_without_document_and_bad_scope_is_rejected(
 
 
 def test_adr_authorization_and_technical_proposal(tmp_path: Path) -> None:
-    broker, _, ref = seed(tmp_path)
+    broker, ids, ref = seed(tmp_path)
     adr = ADR(
         id="ADR-X",
         title="Title",
@@ -279,6 +333,15 @@ def test_adr_authorization_and_technical_proposal(tmp_path: Path) -> None:
         date=date(2026, 10, 18),
     )
     assert "PROPOSED" in render_adr(adr, broker.db)
+    with pytest.raises(PermissionError, match="documentation role"):
+        record_adr(adr, broker, ids[Role.IMPLEMENTER], "run-1", "task-1")
+    proposed = record_adr(adr, broker, ids[Role.DOCUMENTATION], "run-1", "task-1")
+    assert proposed.revision == 1
+    assert (
+        record_adr(adr, broker, ids[Role.DOCUMENTATION], "run-1", "task-1")
+        == proposed
+    )
+    assert get_adr(broker.db, "ADR-X", 1) == proposed
     with pytest.raises(PermissionError):
         render_adr(
             adr.model_copy(
@@ -286,17 +349,86 @@ def test_adr_authorization_and_technical_proposal(tmp_path: Path) -> None:
             ),
             broker.db,
         )
+    WorkflowRepository(broker.db).create(
+        "adr-approval",
+        WorkflowDefinition(
+            id="adr-review",
+            version="1.0.0",
+            name="ADR review",
+            steps=[WorkflowStep(id="approval", type="human_approval")],
+            metadata={"adr_id": "ADR-X", "engineering_run_id": "run-1"},
+        ),
+    )
     with broker.db.connect() as db:
         db.execute(
-            "UPDATE workflow_runs SET definition=? WHERE run_id='run-1-approval'",
+            "INSERT INTO workflow_approvals VALUES (?,?,?,?,?)",
+            (
+                "adr-approval",
+                "approval",
+                "APPROVED",
+                "human",
+                datetime.now(timezone.utc).isoformat(),
+            ),
+        )
+    accepted = adr.model_copy(
+        update={"status": "ACCEPTED", "authorization_run_id": "adr-approval"}
+    )
+    assert "ACCEPTED" in render_adr(accepted, broker.db)
+    recorded = record_adr(
+        accepted, broker, ids[Role.DOCUMENTATION], "run-1", "task-1"
+    )
+    assert recorded.revision == 2 and recorded.status == "ACCEPTED"
+    assert "ADR-X" in execution_report(
+        DocumentationCollector(broker).collect("run-1", "task-1")
+    )
+    WorkflowRepository(broker.db).create(
+        "unrelated-approval",
+        WorkflowDefinition(
+            id="adr-review",
+            version="1.0.0",
+            name="ADR review",
+            steps=[WorkflowStep(id="approval", type="human_approval")],
+            metadata={"adr_id": "ADR-X", "engineering_run_id": "another-run"},
+        ),
+    )
+    with broker.db.connect() as db:
+        db.execute(
+            "INSERT INTO workflow_approvals VALUES (?,?,?,?,?)",
+            (
+                "unrelated-approval",
+                "approval",
+                "APPROVED",
+                "human",
+                datetime.now(timezone.utc).isoformat(),
+            ),
+        )
+    with pytest.raises(PermissionError, match="does not belong"):
+        record_adr(
+            accepted.model_copy(update={"authorization_run_id": "unrelated-approval"}),
+            broker,
+            ids[Role.DOCUMENTATION],
+            "run-1",
+            "task-1",
+        )
+    with broker.db.connect() as db:
+        db.execute(
+            "UPDATE workflow_runs SET definition=? WHERE run_id='adr-approval'",
             (json.dumps({"metadata": {"adr_id": "ADR-X"}}),),
         )
-    assert "ACCEPTED" in render_adr(
-        adr.model_copy(
-            update={"status": "ACCEPTED", "authorization_run_id": "run-1-approval"}
-        ),
-        broker.db,
-    )
+    with pytest.raises(PermissionError, match="invalid ADR authorization workflow"):
+        render_adr(
+            adr.model_copy(
+                update={"status": "ACCEPTED", "authorization_run_id": "adr-approval"}
+            ),
+            broker.db,
+        )
+    with broker.db.connect() as db:
+        with pytest.raises(sqlite3.IntegrityError, match="immutable"):
+            db.execute(
+                "UPDATE adr_records SET content='tampered' "
+                "WHERE adr_id='ADR-X' AND revision=2"
+            )
+    assert get_adr(broker.db, "ADR-X", 2) == recorded
     proposal = technical_documentation(
         "Module", "<script>evil</script> OPENAI_API_KEY=secret", [ref], "aec-run"
     )
@@ -316,7 +448,38 @@ def test_workflow_hook_and_failed_state(tmp_path: Path) -> None:
         db.execute("UPDATE engineering_runs SET status='BLOCKED' WHERE run_id='run-1'")
     worker = DocumentationWorker(broker, ids[Role.DOCUMENTATION])
     validator = workflow_documentation_validator(broker, ids[Role.ORCHESTRATOR], worker)
-    assert validator({"engineering_run_id": "run-1", "task_id": "task-1"})
+    engine = WorkflowEngine(
+        broker,
+        ExecutionManager(broker, {}, [tmp_path]),
+        ids[Role.ORCHESTRATOR],
+        {},
+        ids[Role.QUALITY_GATE],
+        tmp_path,
+        {"documentation": validator},
+    )
+    engine.create(
+        WorkflowDefinition(
+            id="documentation-close",
+            version="1.0.0",
+            name="Document engineering closure",
+            steps=[
+                WorkflowStep(
+                    id="document",
+                    type="validation",
+                    validator="documentation",
+                    inputs={"engineering_run_id": "run-1", "task_id": "task-1"},
+                )
+            ],
+        ),
+        "documentation-workflow",
+    )
+    assert (
+        asyncio.run(engine.run("documentation-workflow")).status
+        == WorkflowStatus.COMPLETED
+    )
+    assert engine.repository.steps("documentation-workflow")["document"].result == {
+        "passed": True
+    }
     assert broker.get_message(f"documentation:{older.message_id}:DOCUMENTATION_FAILED")
     result = broker.get_history("run-1")[-1]
     assert result.type == MessageType.DOCUMENTATION_GENERATED
@@ -353,6 +516,50 @@ def test_approval_without_final_qa_fails(tmp_path: Path) -> None:
         db.execute(
             "UPDATE engineering_iterations SET review=NULL "
             "WHERE run_id='run-1' AND number=2"
+        )
+    request = request_documentation(
+        broker, ids[Role.ORCHESTRATOR], ids[Role.DOCUMENTATION], "run-1", "task-1"
+    )
+    worker = DocumentationWorker(broker, ids[Role.DOCUMENTATION])
+    assert worker.process_next() is None
+    assert broker.get_message(
+        f"documentation:{request.message_id}:DOCUMENTATION_FAILED"
+    )
+
+
+def test_tampered_workflow_version_is_not_reported(tmp_path: Path) -> None:
+    broker, ids, _ = seed(tmp_path)
+    WorkflowRepository(broker.db).create(
+        "run-1-i1-implement",
+        WorkflowDefinition(
+            id="dev-adversarial",
+            version="1.0.0",
+            name="Engineering",
+            steps=[WorkflowStep(id="approval", type="human_approval")],
+            metadata={"engineering_run_id": "run-1"},
+        ),
+    )
+    with broker.db.connect() as db:
+        db.execute(
+            "UPDATE workflow_runs SET definition=replace(definition,'1.0.0','9.0.0') "
+            "WHERE run_id='run-1-i1-implement'"
+        )
+    request = request_documentation(
+        broker, ids[Role.ORCHESTRATOR], ids[Role.DOCUMENTATION], "run-1", "task-1"
+    )
+    worker = DocumentationWorker(broker, ids[Role.DOCUMENTATION])
+    assert worker.process_next() is None
+    assert broker.get_message(
+        f"documentation:{request.message_id}:DOCUMENTATION_FAILED"
+    )
+
+
+def test_execution_result_conflict_is_not_reported(tmp_path: Path) -> None:
+    broker, ids, _ = seed(tmp_path)
+    with broker.db.connect() as db:
+        db.execute(
+            "UPDATE executions SET status='FAILED' "
+            "WHERE execution_id='exec-implement-1'"
         )
     request = request_documentation(
         broker, ids[Role.ORCHESTRATOR], ids[Role.DOCUMENTATION], "run-1", "task-1"

@@ -16,6 +16,18 @@ Documento: ${document_id}.
 
 Agentes registrados no ACP: ${agents}.
 
+## Execuções registradas
+
+| Execução | Agente | Estado | Código de saída |
+| --- | --- | --- | --- |
+${executions}
+
+## Histórico de estados do workflow
+
+| Workflow | Passo | Evento | Horário |
+| --- | --- | --- | --- |
+${state_history}
+
 ## Iterações e validação observadas
 
 | Iteração | Estado | Commit | QA declarado | Quality gates registrados |
@@ -47,6 +59,10 @@ ${artifacts}
 ## Aprovação humana registrada
 
 ${approvals}
+
+## Decisões arquiteturais registradas
+
+${adrs}
 
 ## Lacunas e limitações
 
