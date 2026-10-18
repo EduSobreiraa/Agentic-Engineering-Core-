@@ -2,7 +2,7 @@
 
 ## Objetivo e estado
 
-O AEC coordena tarefas de engenharia por meio de agentes, artefatos verificáveis e decisões humanas. A Fase 1 implementou o ACP local; a Fase 2 acrescentou um manager de execução e o adapter Codex CLI; a Fase 3 acrescentou um Workflow Engine local para grafos acíclicos; a Fase 4 implementou o ciclo adversarial simulado. O Control Plane geral permanece planejado.
+O AEC coordena tarefas de engenharia por meio de agentes, artefatos verificáveis e decisões humanas. A Fase 1 implementou o ACP local; a Fase 2 acrescentou um manager de execução e o adapter Codex CLI; a Fase 3 acrescentou um Workflow Engine local para grafos acíclicos; a Fase 4 implementou o ciclo adversarial simulado. A Fase 5 acrescentou um worker para relatórios documentais determinísticos. O Control Plane geral permanece planejado.
 
 ## Fluxo previsto
 
@@ -52,6 +52,8 @@ O [ACP v0.1](../protocols/ACP_SPEC.md) define gravação antes da entrega, lease
 O [Workflow Engine](../workflows/WORKFLOW_ENGINE.md) persiste a definição e o hash por execução, coordena etapas acíclicas, registra aprovações locais e usa o ACP e o Execution Manager. Não autentica pessoas ou coordena managers em processos distintos. Resultado externo desconhecido interrompe o workflow sem repetição automática.
 
 A [Execution Layer](../execution/EXECUTION_LAYER.md) grava turnos e sessões no mesmo SQLite. Ao reiniciar, marca turnos em andamento como `INTERRUPTED`, sem repetir efeitos externos. O manager usa um semáforo por processo e uma trava por diretório; uma instalação deve ter um único manager ativo para o banco.
+
+O [Worker de Documentação](../documentation-worker/ARCHITECTURE.md) lê registros tipados dessas camadas e grava relatórios históricos no mesmo SQLite, com um artefato Markdown e SHA-256. Um validador registrado permite que o Workflow Engine peça documentação pelo ACP. Revisões de ADR também ficam no SQLite, vinculadas à execução. A documentação técnica é uma proposta renderizada; o worker não altera projetos externos ou decisões humanas.
 
 ## Ordem de construção
 

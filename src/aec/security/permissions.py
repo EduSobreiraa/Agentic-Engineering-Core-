@@ -15,6 +15,9 @@ ALLOWED_SENDERS: dict[MessageType, frozenset[Role]] = {
     MessageType.APPROVAL_REQUEST: frozenset({Role.ORCHESTRATOR}),
     MessageType.TASK_COMPLETED: frozenset({Role.ORCHESTRATOR}),
     MessageType.TASK_FAILED: frozenset({Role.ORCHESTRATOR}),
+    MessageType.DOCUMENTATION_REQUEST: frozenset({Role.ORCHESTRATOR}),
+    MessageType.DOCUMENTATION_GENERATED: frozenset({Role.DOCUMENTATION}),
+    MessageType.DOCUMENTATION_FAILED: frozenset({Role.DOCUMENTATION}),
 }
 
 ALLOWED_RECIPIENTS: dict[MessageType, frozenset[Role]] = {
@@ -28,4 +31,7 @@ ALLOWED_RECIPIENTS: dict[MessageType, frozenset[Role]] = {
     MessageType.APPROVAL_REQUEST: frozenset({Role.ORCHESTRATOR}),
     MessageType.TASK_COMPLETED: frozenset({Role.QUALITY_GATE}),
     MessageType.TASK_FAILED: frozenset({Role.QUALITY_GATE}),
+    MessageType.DOCUMENTATION_REQUEST: frozenset({Role.DOCUMENTATION}),
+    MessageType.DOCUMENTATION_GENERATED: frozenset({Role.ORCHESTRATOR}),
+    MessageType.DOCUMENTATION_FAILED: frozenset({Role.ORCHESTRATOR}),
 }

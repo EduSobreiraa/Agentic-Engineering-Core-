@@ -121,3 +121,13 @@ Estas decisões foram aceitas no escopo inicial. Mudanças futuras devem acresce
 **Decisão:** `AdversarialLoop` persiste a iteração e executa cada papel por um workflow `dev-adversarial@1.0.0` separado. O Execution Manager continua sendo a única ponte com adapters. Commits e worktrees locais são capturados pelo núcleo; o QA revisa snapshot separado. Gates são comandos registrados pelo projeto, e o pedido de aprovação usa o passo humano da Fase 3. Critérios, limite e configuração de gates são fixados na execução.
 
 **Efeito:** outros workflows não precisam seguir essa metodologia. Worktrees não são isolamento de segurança em nível de sistema operacional. Resultado externo incerto bloqueia retomada automática; não há merge ou push automático. A integração real com dois Codex e recuperação de commits capturados imediatamente antes de falha SQLite exigem verificação posterior.
+
+## ADR-013: Documentos históricos derivados de evidências tipadas
+
+**Estado:** proposto na branch da Fase 5 em 2026-10-18; a revisão humana da mudança ainda está pendente.
+
+**Contexto:** o ciclo adversarial já persiste implementações, revisões, gates e aprovações, mas não produz um registro documental recuperável. Declarações de agentes não comprovam testes nem decisões humanas.
+
+**Decisão proposta:** o Worker de Documentação recebe pedidos ACP autorizados, coleta os registros existentes no SQLite e gera relatórios Markdown determinísticos. O mesmo banco guarda IDs, hashes e referências dos documentos históricos. `adr_records` guarda revisões de ADR vinculadas à execução. IDs de pedidos tornam o processamento idempotente. O worker não edita registros históricos, aprovações, políticas ou metodologias. ADRs aceitos exigem uma aprovação humana local vinculada ao próprio ADR.
+
+**Efeito:** o ACP ganha mensagens documentais tipadas e rotas por papel. O Workflow Engine pode solicitar um relatório por um validador registrado, sem criar um executor paralelo. A integridade do arquivo pode ser comparada ao SHA-256 persistido. O limite de um writer por banco e a ausência de autenticação humana entre máquinas continuam válidos.

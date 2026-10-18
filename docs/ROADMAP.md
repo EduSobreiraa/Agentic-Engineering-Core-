@@ -77,12 +77,14 @@ Cada item tem um identificador estável para vincular issues, commits e evidênc
 
 ## Fase 5: documentação
 
-- [ ] F5-01 Criar Worker de Documentação.
-- [ ] F5-02 Gerar relatórios de execução.
-- [ ] F5-03 Registrar decisões arquiteturais durante execuções.
-- [ ] F5-04 Gerar histórico de alterações.
-- [ ] F5-05 Vincular evidências aos relatórios.
-- [ ] F5-06 Integrar documentação ao fechamento dos workflows.
+- [x] F5-01 Criar Worker de Documentação. Evidência: `src/aec/documentation/worker.py`, contratos e rotas ACP testados.
+- [x] F5-02 Gerar relatórios de execução. Evidência: template determinístico, `documentation_records` e cenário de duas iterações em `tests/integration/test_documentation.py`.
+- [x] F5-03 Registrar decisões arquiteturais durante execuções. Evidência: `adr_records`, revisões vinculadas a `engineering_runs`, hash conferido e aprovação humana ligada ao ADR e à execução.
+- [x] F5-04 Gerar histórico de alterações. Evidência: `change_summary()` usa commits e arquivos de `ImplementationResult` por iteração.
+- [x] F5-05 Vincular evidências aos relatórios. Evidência: `source_refs` ACP, matriz de rastreabilidade, verificação de arquivos e SHA-256.
+- [x] F5-06 Integrar documentação ao fechamento dos workflows. Evidência: validador registrado em um passo real do Workflow Engine no teste de integração; falha documental não altera o estado da engenharia.
+
+**Conclusão do MVP determinístico:** o worker gera e recupera relatórios históricos para execuções aprovadas ou bloqueadas, registra revisões de ADR e publica resultados pelo ACP. A documentação técnica evolutiva é renderizada como proposta supervisionada; a escrita no projeto de destino permanece fora do worker. Não houve execução real do Codex CLI na verificação desta fase. O núcleo local ainda pressupõe um writer por banco e não autentica humanos entre máquinas.
 
 ## Fase 6: governança metodológica
 

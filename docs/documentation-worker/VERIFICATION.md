@@ -1,0 +1,7 @@
+# Verificação da Fase 5
+
+Em 2026-10-18, a branch da Fase 5 passou em `uv run ruff check .`, `uv run mypy` e `uv run pytest`: 100 testes passaram e 1 teste opt-in de Codex real foi ignorado. `uv build --wheel` incluiu os cinco templates Markdown no pacote. Os links locais dos documentos Markdown foram conferidos.
+
+`tests/integration/test_documentation.py` usa um fixture identificado, com duas iterações de engenharia, finding de QA, commit posterior, gate, execução tipada, evento de workflow e aprovação humana local. O teste consulta os registros, aciona um passo real do Workflow Engine, publica `DOCUMENTATION_GENERATED`, recupera o artefato e confere hash, referências e texto. Outros casos cobrem execução bloqueada, evidência ausente, definição de workflow adulterada, redelivery, arquivo órfão, alteração de registro histórico, diretório de artefatos redirecionado por symlink e autorização de ADR.
+
+O fixture não comprova execução com dois processos Codex reais. A autenticação humana é local, e a instalação deve usar um writer ativo por banco. O worker gera automaticamente relatórios de execução, QA e alterações. Documentação técnica evolutiva continua uma proposta que precisa do workflow do projeto de destino para revisão e escrita. A Fase 6 não foi iniciada.
