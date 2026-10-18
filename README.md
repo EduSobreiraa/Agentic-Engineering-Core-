@@ -1,6 +1,6 @@
 # Agentic Engineering Core
 
-O Agentic Engineering Core (AEC) é um projeto Python para coordenar trabalho de engenharia entre agentes especializados, verificações determinísticas e aprovação humana. A Fase 1 implementa o ACP v0.1; a Fase 2 acrescenta execução por adapters; a Fase 3 acrescenta workflows declarativos e persistentes.
+O Agentic Engineering Core (AEC) é um projeto Python para coordenar trabalho de engenharia entre agentes especializados, verificações determinísticas e aprovação humana. A Fase 1 implementa o ACP v0.1; a Fase 2 acrescenta execução por adapters; a Fase 3 acrescenta workflows declarativos e persistentes; a Fase 4 acrescenta o ciclo adversarial com worktrees e QA independente.
 
 ## Começar
 
@@ -43,6 +43,7 @@ tests/                    verificações do pacote
 docs/architecture/        arquitetura, componentes e decisões
 docs/protocols/            contratos e limites do ACP v0.1
 docs/workflows/            contratos e limites dos workflows
+docs/engineering/          ciclo adversarial, papéis, gates e aprovação
 docs/ROADMAP.md           tarefas e critérios por fase
 ```
 
@@ -50,4 +51,4 @@ O [roadmap](docs/ROADMAP.md) registra o progresso. A [arquitetura](docs/architec
 
 ## Limites atuais
 
-O ACP v0.1 permanece independente de executores. A Execution Layer inicia processos e guarda estados. O Workflow Engine coordena grafos acíclicos e validadores Python registrados, mas não implementa o ciclo adversarial da Fase 4. Handles e aprovação local não autenticam usuários entre máquinas. Reinícios não repetem turnos externos de resultado incerto. Use um único manager ativo por banco; o workflow com Codex CLI foi verificado em um ensaio local read-only em 2026-10-18, até `WAITING_APPROVAL`.
+O ACP v0.1 permanece independente de executores. A Execution Layer inicia processos e guarda estados. O Workflow Engine coordena grafos acíclicos; o ciclo adversarial controla repetições limitadas usando seus workflows. Execute `uv run pytest -q tests/scenarios/test_adversarial_loop.py` para o cenário simulado. Veja [o ciclo e suas limitações](docs/engineering/ADVERSARIAL_LOOP.md). Handles e aprovação local não autenticam usuários entre máquinas. Reinícios não repetem turnos externos de resultado incerto. Use um único manager ativo por banco. A Fase 4 ainda não foi validada com dois Codex reais.

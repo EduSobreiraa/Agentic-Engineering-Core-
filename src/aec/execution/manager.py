@@ -7,6 +7,7 @@ import hashlib
 import json
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Literal
 from uuid import uuid4
 
 from aec.communication.broker import Broker
@@ -18,7 +19,9 @@ from aec.communication.schemas import (
     MessageType,
     ReviewRequest,
     TaskAssigned,
+    ValidationResult,
 )
+from aec.engineering.models import QAReviewResult
 from aec.security.identities import Identity, Role
 
 from .base import ExecutionAdapter
@@ -82,6 +85,12 @@ class ExecutionManager:
             and request.prompt != source.payload.instructions
         ):
             raise PermissionError("prompt does not match ACP assignment")
+        if (
+            isinstance(source.payload, ReviewRequest)
+            and source.metadata.get("engineering_run_id") is not None
+            and request.prompt != source.payload.criteria
+        ):
+            raise PermissionError("prompt does not match ACP review request")
         if request.sandbox_mode == "workspace-write" and (
             identity.agent_id not in self.writable_agents
             or source.metadata.get("workspace_write") is not True
@@ -186,7 +195,10 @@ class ExecutionManager:
                 source.payload, ReviewRequest
             ):
                 try:
-                    self._finding(source.payload, result.output)
+                    if "review_status" in json.loads(result.output):
+                        QAReviewResult.model_validate_json(result.output)
+                    else:
+                        self._finding(source.payload, result.output)
                 except ValueError:
                     result.status = ExecutionStatus.FAILED
                     result.error = "invalid_qa_output"
@@ -223,10 +235,49 @@ class ExecutionManager:
         self, source: Message, identity: Identity, result: ExecutionResult
     ) -> None:
         ref = result.artifact_refs[0]
-        payload: FindingReported | ArtifactSubmitted
+        payload: FindingReported | ArtifactSubmitted | ValidationResult
         if isinstance(source.payload, ReviewRequest):
-            kind = MessageType.FINDING_REPORTED
-            payload = self._finding(source.payload, result.output)
+            data = json.loads(result.output)
+            if "review_status" in data:
+                review = QAReviewResult.model_validate_json(result.output)
+                for finding in review.findings:
+                    self.broker.publish(
+                        Message(
+                            protocol="ACP",
+                            version="0.1",
+                            message_id=f"finding:{result.execution_id}:{finding.finding_id}",
+                            run_id=source.run_id,
+                            task_id=source.task_id,
+                            sender=identity.agent_id,
+                            recipient=source.sender,
+                            type=MessageType.FINDING_REPORTED,
+                            iteration=source.iteration,
+                            created_at=result.finished_at,
+                            payload=FindingReported(
+                                artifact_id=source.payload.artifact_id,
+                                severity=self._acp_severity(finding.severity.value),
+                                description=(
+                                    f"{finding.finding_id}: {finding.description}"
+                                ),
+                            ),
+                            causation_id=source.message_id,
+                            artifact_refs=[ref],
+                            metadata={
+                                "execution_id": result.execution_id,
+                                **source.metadata,
+                            },
+                        ),
+                        identity,
+                    )
+                kind = MessageType.VALIDATION_RESULT
+                payload = ValidationResult(
+                    artifact_id=source.payload.artifact_id,
+                    passed=review.review_status == "PASSED",
+                    evidence=f"QA report: {ref.uri}",
+                )
+            else:
+                kind = MessageType.FINDING_REPORTED
+                payload = self._finding(source.payload, result.output)
         else:
             kind = MessageType.ARTIFACT_SUBMITTED
             payload = ArtifactSubmitted(
@@ -246,7 +297,7 @@ class ExecutionManager:
             payload=payload,
             causation_id=source.message_id,
             artifact_refs=[ref],
-            metadata={"execution_id": result.execution_id},
+            metadata={"execution_id": result.execution_id, **source.metadata},
         )
         self.broker.publish(message, identity)
 
@@ -259,6 +310,16 @@ class ExecutionManager:
             {**data, "artifact_id": review.artifact_id}
         )
         return finding.model_copy(update={"description": finding.description[:4000]})
+
+    @staticmethod
+    def _acp_severity(value: str) -> Literal["low", "medium", "high", "critical"]:
+        if value == "CRITICAL":
+            return "critical"
+        if value == "HIGH":
+            return "high"
+        if value == "MEDIUM":
+            return "medium"
+        return "low"
 
     async def cancel(self, execution_id: str) -> bool:
         for adapter in self.adapters.values():

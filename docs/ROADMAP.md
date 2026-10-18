@@ -52,28 +52,28 @@ Cada item tem um identificador estável para vincular issues, commits e evidênc
 - [x] F3-03 Validar versões e esquemas. Evidência: `validate()` e testes de definições inválidas.
 - [x] F3-04 Construir máquina de estados. Evidência: `workflows/state_machine.py` e eventos persistidos.
 - [x] F3-05 Implementar transições condicionais. Evidência: condição booleana sobre resultado de validador.
-- [ ] F3-06 Implementar limites de iteração. Adiado para o contrato de loops adversariais da Fase 4; workflows da Fase 3 são acíclicos.
+- [x] F3-06 Implementar limites de iteração. Evidência: `AdversarialLoop` persiste e fixa `max_iterations`; workflows da Fase 3 continuam acíclicos.
 - [x] F3-07 Implementar retries seguros. Evidência: tentativas limitadas de validadores registrados; agentes não são repetidos automaticamente.
 - [x] F3-08 Implementar regras de interrupção. Evidência: timeout, cancelamento e estado `INTERRUPTED` para resultado incerto.
 - [x] F3-09 Recuperar workflows após falhas. Evidência: `recover()` reconcilia resultados conhecidos e preserva aprovação pendente.
 
-**Estado:** motor local de workflows acíclicos, versionados e persistentes implementado com adapter simulado e verificado com dois turnos Codex reais até `WAITING_APPROVAL`. Coordenação entre processos permanece pendente. O ciclo Implementador ↔ QA permanece na Fase 4.
+**Estado:** motor local de workflows acíclicos, versionados e persistentes implementado com adapter simulado e verificado com dois turnos Codex reais até `WAITING_APPROVAL`. Coordenação entre processos permanece pendente. A Fase 4 acrescentou o ciclo Implementador e QA como metodologia especializada.
 
 ## Fase 4: ciclo adversarial de engenharia
 
-- [ ] F4-01 Criar contrato do Implementador.
-- [ ] F4-02 Criar contrato do QA adversarial.
-- [ ] F4-03 Definir pacotes de contexto.
-- [ ] F4-04 Implementar submissão de artefatos.
-- [ ] F4-05 Implementar revisão independente.
-- [ ] F4-06 Implementar relatório estruturado de falhas.
-- [ ] F4-07 Implementar ciclo de correção.
-- [ ] F4-08 Integrar testes determinísticos.
-- [ ] F4-09 Bloquear conclusão quando houver falhas críticas.
-- [ ] F4-10 Exigir aprovação humana antes do merge.
-- [ ] F4-11 Executar experimento completo em repositório de teste.
+- [x] F4-01 Criar contrato do Implementador. Evidência: `engineering/models.py`.
+- [x] F4-02 Criar contrato do QA adversarial. Evidência: `QAReviewResult` e `ReviewFinding`.
+- [x] F4-03 Definir pacotes de contexto. Evidência: `engineering/loop.py` e `CONTEXT_PACKAGES.md`.
+- [x] F4-04 Implementar submissão de artefatos. Evidência: commit capturado e referências ACP verificadas.
+- [x] F4-05 Implementar revisão independente. Evidência: worktree QA e cenário simulado.
+- [x] F4-06 Implementar relatório estruturado de falhas. Evidência: findings persistidos em SQLite e ACP.
+- [x] F4-07 Implementar ciclo de correção. Evidência: cenário de duas iterações e limite.
+- [x] F4-08 Integrar testes determinísticos. Evidência: `CommandGate` e cenário `unittest`.
+- [x] F4-09 Bloquear conclusão quando houver falhas críticas. Evidência: testes de limite e gate reprovado.
+- [x] F4-10 Exigir aprovação humana antes do merge. Evidência: `WAITING_APPROVAL` e teste de autorização.
+- [x] F4-11 Executar experimento completo em repositório de teste. Evidência: `tests/scenarios/test_adversarial_loop.py`, apenas agentes simulados.
 
-**Conclusão:** Implementador, QA, correção, validação e aprovação funcionam sem cópia manual de mensagens.
+**Conclusão do MVP simulado:** Implementador, QA, correção, validação e aprovação funcionam sem cópia manual de mensagens. A execução real com dois Codex, isolamento de sistema operacional e recuperação de commits após falha de persistência continuam pendentes.
 
 ## Fase 5: documentação
 

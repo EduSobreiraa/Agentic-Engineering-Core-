@@ -103,6 +103,24 @@ MIGRATIONS = (
         FOREIGN KEY(run_id, step_id) REFERENCES workflow_steps(run_id, step_id)
     );
     """,
+    """
+    CREATE TABLE engineering_runs (
+        run_id TEXT PRIMARY KEY, task_id TEXT NOT NULL,
+        specification TEXT NOT NULL, criteria TEXT NOT NULL,
+        allowed_paths TEXT NOT NULL, repository_path TEXT NOT NULL,
+        worktree_path TEXT NOT NULL, base_commit TEXT NOT NULL,
+        head_commit TEXT NOT NULL, iteration INTEGER NOT NULL DEFAULT 1,
+        max_iterations INTEGER NOT NULL, max_duration_seconds REAL NOT NULL,
+        gate_config TEXT NOT NULL,
+        status TEXT NOT NULL, error TEXT, created_at TEXT NOT NULL
+    );
+    CREATE TABLE engineering_iterations (
+        run_id TEXT NOT NULL REFERENCES engineering_runs(run_id),
+        number INTEGER NOT NULL, status TEXT NOT NULL,
+        implementation TEXT, review TEXT, gates TEXT,
+        PRIMARY KEY(run_id, number)
+    );
+    """,
 )
 
 

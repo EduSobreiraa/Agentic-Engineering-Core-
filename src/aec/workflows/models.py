@@ -49,6 +49,7 @@ class WorkflowStep(BaseModel):
     type: Literal["agent", "validation", "human_approval"]
     agent: str | None = None
     executor: str | None = None
+    sandbox_mode: Literal["read-only", "workspace-write"] = "read-only"
     validator: str | None = None
     depends_on: list[str] = Field(default_factory=list)
     condition: Condition | None = None

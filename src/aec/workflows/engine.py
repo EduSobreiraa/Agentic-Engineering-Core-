@@ -13,6 +13,7 @@ from aec.communication.broker import Broker
 from aec.communication.schemas import (
     Message,
     MessageType,
+    ReviewRequest,
     TaskAssigned,
     TaskFailed,
     ValidationResult,
@@ -85,6 +86,13 @@ class WorkflowEngine:
                 or step.executor not in self.manager.adapters
             ):
                 raise ValueError("agent or executor is not registered")
+            if step.type == "agent" and step.agent in self.agents:
+                agent = self.agents[step.agent]
+                if agent.role == Role.QA and (
+                    step.sandbox_mode != "read-only"
+                    or not step.inputs.get("artifact_id")
+                ):
+                    raise ValueError("QA needs read-only mode and artifact_id")
             if step.type == "validation" and step.validator not in self.validators:
                 raise ValueError("validator is not registered")
         run = self.repository.create(run_id or str(uuid4()), definition)
@@ -224,15 +232,18 @@ class WorkflowEngine:
     async def _agent_step(self, run_id: str, step: WorkflowStep) -> None:
         assert step.agent is not None and step.executor is not None
         identity = self.agents[step.agent]
-        if identity.role != Role.IMPLEMENTER:
-            raise PermissionError("agent steps require implementer role")
+        if identity.role not in {Role.IMPLEMENTER, Role.QA}:
+            raise PermissionError("agent steps require implementer or QA role")
         prompt = self._inputs(run_id, step)["prompt"]
         attempt = self.repository.steps(run_id)[step.id].attempt + 1
+        workflow_metadata = self.repository.definition(run_id).metadata
+        iteration = int(workflow_metadata.get("iteration", "0"))
         execution_id = f"workflow:{run_id}:{step.id}:{attempt}"
         message_id = f"assignment:{run_id}:{step.id}:{attempt}"
         self.repository.step_status(
             run_id, step.id, StepStatus.RUNNING, execution_id=execution_id
         )
+        is_review = identity.role == Role.QA
         message = Message(
             protocol="ACP",
             version="0.1",
@@ -241,11 +252,22 @@ class WorkflowEngine:
             task_id=step.id,
             sender=self.orchestrator.agent_id,
             recipient=identity.agent_id,
-            type=MessageType.TASK_ASSIGNED,
-            iteration=0,
+            type=MessageType.REVIEW_REQUEST if is_review else MessageType.TASK_ASSIGNED,
+            iteration=iteration,
             created_at=datetime.now(timezone.utc),
-            payload=TaskAssigned(title=step.id, instructions=prompt),
-            metadata={"workflow_step": step.id},
+            payload=(
+                ReviewRequest(
+                    artifact_id=self._inputs(run_id, step)["artifact_id"],
+                    criteria=prompt,
+                )
+                if is_review
+                else TaskAssigned(title=step.id, instructions=prompt)
+            ),
+            metadata={
+                "workflow_step": step.id,
+                "workspace_write": step.sandbox_mode == "workspace-write",
+                **workflow_metadata,
+            },
         )
         try:
             self.broker.publish(message, self.orchestrator)
@@ -258,6 +280,7 @@ class WorkflowEngine:
                     executor=step.executor,
                     prompt=prompt,
                     working_directory=self.workspaces.get(step.agent, self.workspace),
+                    sandbox_mode=step.sandbox_mode,
                     timeout_seconds=step.timeout_seconds or 120,
                 ),
                 identity,
@@ -290,7 +313,17 @@ class WorkflowEngine:
             expected_assignment = f"assignment:{run_id}:{step_id}:{attempt}"
             if (
                 message is None
-                or message.type != MessageType.ARTIFACT_SUBMITTED
+                or message.type
+                not in (
+                    {MessageType.VALIDATION_RESULT, MessageType.FINDING_REPORTED}
+                    if result.agent_id
+                    in {
+                        agent.agent_id
+                        for agent in self.agents.values()
+                        if agent.role == Role.QA
+                    }
+                    else {MessageType.ARTIFACT_SUBMITTED}
+                )
                 or message.run_id != run_id
                 or message.task_id != step_id
                 or message.sender != result.agent_id

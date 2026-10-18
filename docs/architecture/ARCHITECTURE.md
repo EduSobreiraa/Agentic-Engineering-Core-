@@ -2,7 +2,7 @@
 
 ## Objetivo e estado
 
-O AEC coordenará tarefas de engenharia por meio de agentes, artefatos verificáveis e decisões humanas. Este documento descreve a arquitetura alvo. A Fase 1 implementou o ACP local; a Fase 2 acrescentou um manager de execução e o adapter Codex CLI; a Fase 3 acrescentou um Workflow Engine local para grafos acíclicos. O Control Plane completo e o ciclo adversarial permanecem planejados.
+O AEC coordena tarefas de engenharia por meio de agentes, artefatos verificáveis e decisões humanas. A Fase 1 implementou o ACP local; a Fase 2 acrescentou um manager de execução e o adapter Codex CLI; a Fase 3 acrescentou um Workflow Engine local para grafos acíclicos; a Fase 4 implementou o ciclo adversarial simulado. O Control Plane geral permanece planejado.
 
 ## Fluxo previsto
 
@@ -31,7 +31,7 @@ O Control Plane recebe a tarefa, identifica o escopo, escolhe uma metodologia pu
 
 ## Metodologias previstas
 
-O primeiro fluxo completo será o ciclo Implementador, QA adversarial, correção, validação e aprovação. O desenho também contempla TDD, Implementation Arena, auditoria Red Team e Blue Team, decisão adversarial e melhoria por PDCA. A referência a GANs descreve a alternância entre produção e avaliação de artefatos; o AEC não treina redes neurais nem altera pesos de modelos. As demais metodologias entram somente nas fases indicadas no roadmap.
+O primeiro fluxo completo é `dev-adversarial@1.0.0`, com Implementador, QA adversarial, correção, validação e aprovação. O controlador especializado persiste iterações e reutiliza workflows acíclicos para cada agente e para a aprovação. O desenho também contempla TDD, Implementation Arena, auditoria Red Team e Blue Team, decisão adversarial e melhoria por PDCA. A referência a GANs descreve a alternância entre produção e avaliação de artefatos; o AEC não treina redes neurais nem altera pesos de modelos. As demais metodologias entram somente nas fases indicadas no roadmap.
 
 ## Limites e invariantes
 
