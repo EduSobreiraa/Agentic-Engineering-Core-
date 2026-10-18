@@ -1,0 +1,36 @@
+$ uv run ruff check .
+exit=0
+All checks passed!
+
+$ uv run mypy
+exit=0
+Success: no issues found in 63 source files
+
+$ uv run pytest
+exit=0
+============================= test session starts ==============================
+platform linux -- Python 3.14.8, pytest-9.1.1, pluggy-1.7.0
+rootdir: /home/edupires/orca/workspaces/AEC/feature-fase-6-governanca-metodologica
+configfile: pyproject.toml
+testpaths: tests
+collected 124 items
+
+tests/integration/test_broker.py ....                                    [  3%]
+tests/integration/test_documentation.py ............                     [ 12%]
+tests/integration/test_execution.py ............                         [ 22%]
+tests/integration/test_persistence.py ....                               [ 25%]
+tests/integration/test_recovery.py .                                     [ 26%]
+tests/scenarios/test_adversarial_loop.py .................               [ 40%]
+tests/scenarios/test_agent_exchange.py .                                 [ 41%]
+tests/scenarios/test_methodology_evolution.py ......                     [ 45%]
+tests/scenarios/test_real_codex_opt_in.py ss                             [ 47%]
+tests/test_package.py .                                                  [ 48%]
+tests/unit/test_engineering_contracts.py ....                            [ 51%]
+tests/unit/test_methodology.py ....                                      [ 54%]
+tests/unit/test_permissions.py .....                                     [ 58%]
+tests/unit/test_routing.py .                                             [ 59%]
+tests/unit/test_schemas.py ...................................           [ 87%]
+tests/workflows/test_engine.py ...............                           [100%]
+
+======================== 122 passed, 2 skipped in 5.51s ========================
+

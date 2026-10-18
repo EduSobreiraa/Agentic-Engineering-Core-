@@ -1,0 +1,11 @@
+- [x] Ler os princípios de poteto-mode e o estado das Fases 0–6.
+- [x] Definir escopo, predicado de conclusão e baseline.
+- [x] Separar unidades verificáveis, começando pela recuperação de commit.
+- [x] Recuperar snapshot capturado após falha de persistência, sem repetir agente.
+- [x] Calcular completude documental com manifesto verificável.
+- [x] Revisar isolamento e coordenação entre processos da Execution Layer.
+- [x] Integrar versões publicadas ao ciclo adversarial, sem alterar a metodologia aprovada.
+- [x] Verificar a comparação metodológica existente; registrar a ausência de executor de tarefas equivalentes como limite.
+- [x] Registrar limites de autenticação, sandbox e retomada externa com evidência.
+- [x] Executar ruff, mypy, pytest e cenários relevantes; atualizar roadmap e decisões.
+- [x] Executar novamente o cenário opt-in Codex real após as mudanças.
