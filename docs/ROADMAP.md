@@ -16,20 +16,20 @@ Cada item tem um identificador estável para vincular issues, commits e evidênc
 
 ## Fase 1: ACP v0.1
 
-- [ ] F1-01 Especificar o protocolo ACP v0.1.
-- [ ] F1-02 Definir o envelope das mensagens.
-- [ ] F1-03 Definir tipos de mensagens.
-- [ ] F1-04 Definir contratos de payload.
-- [ ] F1-05 Implementar modelos Pydantic.
-- [ ] F1-06 Definir identidade e autorização dos agentes.
-- [ ] F1-07 Implementar broker local.
-- [ ] F1-08 Implementar persistência em SQLite.
-- [ ] F1-09 Implementar entrega, ACK e tratamento de erros.
-- [ ] F1-10 Implementar deduplicação e processamento idempotente.
-- [ ] F1-11 Criar testes unitários e de integração.
-- [ ] F1-12 Criar demonstração entre agentes simulados.
+- [x] F1-01 Especificar o protocolo ACP v0.1. Evidência: `docs/protocols/ACP_SPEC.md`.
+- [x] F1-02 Definir o envelope das mensagens. Evidência: `communication/schemas.py`.
+- [x] F1-03 Definir tipos de mensagens. Evidência: `MESSAGE_TYPES.md`.
+- [x] F1-04 Definir contratos de payload. Evidência: `communication/schemas.py`.
+- [x] F1-05 Implementar modelos Pydantic. Evidência: testes de contratos.
+- [x] F1-06 Definir identidade e autorização dos agentes. Evidência: `security/`.
+- [x] F1-07 Implementar broker local. Evidência: `communication/broker.py`.
+- [x] F1-08 Implementar persistência em SQLite. Evidência: migração v1.
+- [x] F1-09 Implementar entrega, ACK e tratamento de erros. Evidência: testes de broker.
+- [x] F1-10 Implementar deduplicação e processamento idempotente. Evidência: recibos únicos e testes de republicação.
+- [x] F1-11 Criar testes unitários e de integração. Evidência: `tests/`.
+- [x] F1-12 Criar demonstração entre agentes simulados. Evidência: `simulation/agents.py`.
 
-**Conclusão:** dois agentes simulados trocam mensagens estruturadas com persistência, recuperação e validação de permissões.
+**Conclusão:** orquestrador, implementador, QA e quality gate simulados trocam mensagens estruturadas com persistência, recuperação e validação de permissões. A confirmação do recibo não garante execução exatamente uma vez de efeitos externos.
 
 ## Fase 2: execução
 

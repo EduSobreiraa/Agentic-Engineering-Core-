@@ -61,3 +61,13 @@ Estas decisões foram aceitas no escopo inicial. Mudanças futuras devem acresce
 **Decisão:** políticas, limites, transições críticas e quality gates objetivos serão verificados por código. Ações destrutivas, merge, publicação e mudanças metodológicas exigirão a aprovação humana prevista pela política.
 
 **Efeito:** relatórios dos agentes são insumos de avaliação, não prova final de autorização ou sucesso.
+
+## ADR-007: ACP v0.1 local com SQLite e handles internos
+
+**Estado:** aceito em 2026-10-17.
+
+**Contexto:** a Fase 1 precisa persistir mensagens antes da entrega e recuperar falhas sem serviço externo. A identidade textual no envelope não prova quem enviou a mensagem.
+
+**Decisão:** o broker emite handles locais, confere remetente e rota por papel e grava mensagens, entregas, recibos e eventos em SQLite. `BEGIN IMMEDIATE` serializa reivindicações. Cada claim recebe um token distinto; ACK exige o token vigente. `message_id` é único e republicações conflitantes são rejeitadas. A versão do esquema usa `PRAGMA user_version`.
+
+**Efeito:** a entrega é *at-least-once*. Recibos únicos evitam duplicação no estado do broker, mas efeitos externos exigirão reconciliação. Handles não protegem contra processos locais maliciosos. Leitura de histórico é reservada ao código local confiável. O ACP não decide transições de workflow.
