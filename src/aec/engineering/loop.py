@@ -295,6 +295,68 @@ class AdversarialLoop:
                     (head, run_id),
                 )
 
+    def _recover_snapshot(
+        self, run_id: str, number: int, row: dict[str, str | int]
+    ) -> bool:
+        """Finish the database write after a controller commit survived a crash."""
+        workflow_id = f"{run_id}-i{number}-implement"
+        engine = self._engine(Path(str(row["worktree_path"])))
+        try:
+            workflow = engine.repository.get_run(workflow_id)
+            step = engine.repository.steps(workflow_id)["implement"]
+            execution = self.manager.repository.get(str(step.execution_id))
+            worktree = Path(str(row["worktree_path"]))
+            base = str(row["head_commit"])
+            head = commit_hash(worktree)
+            files = git(worktree, "diff", "--name-only", base, head).splitlines()
+            allowed = tuple(json.loads(str(row["allowed_paths"])))
+            if (
+                workflow.status != WorkflowStatus.COMPLETED
+                or not isinstance(execution, ExecutionResult)
+                or execution.status != "SUCCEEDED"
+                or execution.agent_id != self.implementer.agent_id
+                or not isinstance(step.result, dict)
+                or not isinstance(step.result.get("output"), str)
+                or step.result["output"] != execution.output
+                or git(worktree, "show", "-s", "--format=%P", head) != base
+                or git(worktree, "show", "-s", "--format=%s", head)
+                != "AEC implementation snapshot"
+                or git(worktree, "show", "-s", "--format=%an <%ae>", head)
+                != "AEC <aec@localhost>"
+                or not files
+                or changed_files(worktree)
+                or not execution.artifact_refs
+                or any(
+                    not any(
+                        file == prefix or file.startswith(prefix.rstrip("/") + "/")
+                        for prefix in allowed
+                    )
+                    or not (worktree / file).is_file()
+                    or (worktree / file).is_symlink()
+                    for file in files
+                )
+                or any(
+                    not self._artifact_intact(ref) for ref in execution.artifact_refs
+                )
+            ):
+                return False
+        except (KeyError, OSError, RuntimeError, ValueError):
+            return False
+        implementation = ImplementationResult(
+            task_id=str(row["task_id"]),
+            iteration=number,
+            status="SUCCEEDED",
+            base_commit=base,
+            result_commit=head,
+            changed_files=files,
+            artifact_refs=execution.artifact_refs,
+            implementation_summary=execution.output,
+        )
+        self._save(
+            run_id, number, "IMPLEMENTED", implementation=implementation, head=head
+        )
+        return True
+
     async def run(self, run_id: str) -> str:
         if run_id in self._active:
             raise RuntimeError("engineering run is already active")
@@ -339,6 +401,10 @@ class AdversarialLoop:
             except (OSError, RuntimeError, ValueError):
                 head_matches = False
             if not head_matches:
+                if current["status"] == "PREPARED" and self._recover_snapshot(
+                    run_id, number, row
+                ):
+                    continue
                 self._block(
                     run_id, "implementation head changed outside the controller"
                 )

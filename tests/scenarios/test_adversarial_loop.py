@@ -343,6 +343,68 @@ def test_interruption_before_correction_resumes_once(
     assert adapter.implementations == 2
 
 
+def test_commit_captured_before_database_failure_is_recovered(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    loop, adapter = setup(tmp_path)
+    run_id = loop.create("divide", "Fix zero handling", ("zero raises",), ("calc.py",))
+    original = loop._save
+
+    def fail_before_save(*args: object, **kwargs: object) -> None:
+        if len(args) >= 3 and args[2] == "IMPLEMENTED":
+            raise KeyboardInterrupt("database unavailable after commit")
+        original(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(loop, "_save", fail_before_save)
+    with pytest.raises(KeyboardInterrupt):
+        asyncio.run(loop.run(run_id))
+    assert adapter.implementations == 1
+    assert loop.history(run_id)["iterations"][0]["status"] == "PREPARED"
+    broker = Broker(tmp_path / "aec.sqlite")
+    manager = ExecutionManager(
+        broker,
+        {"simulated": adapter},
+        [tmp_path / "worktrees"],
+        writable_agents=frozenset({"implementer"}),
+    )
+    resumed = AdversarialLoop(
+        broker,
+        manager,
+        broker.register("orchestrator", Role.ORCHESTRATOR),
+        broker.register("implementer", Role.IMPLEMENTER),
+        broker.register("qa", Role.QA),
+        broker.register("quality-gate", Role.QUALITY_GATE),
+        tmp_path / "project",
+        tmp_path / "worktrees",
+        loop.gates,
+        executor="simulated",
+        max_iterations=2,
+        local_approvers=frozenset({"supervisor"}),
+    )
+    assert asyncio.run(resumed.run(run_id)) == "WAITING_APPROVAL"
+    assert adapter.implementations == 2
+
+
+def test_unrelated_commit_is_not_recovered(tmp_path: Path) -> None:
+    loop, adapter = setup(tmp_path)
+    run_id = loop.create("divide", "Fix zero handling", ("zero raises",), ("calc.py",))
+    worktree = Path(loop.history(run_id)["run"]["worktree_path"])
+    (worktree / "calc.py").write_text("def divide(a, b):\n    return 0\n")
+    git(worktree, "add", "calc.py")
+    git(
+        worktree,
+        "-c",
+        "user.name=Other",
+        "-c",
+        "user.email=other@localhost",
+        "commit",
+        "-qm",
+        "unrelated change",
+    )
+    assert asyncio.run(loop.run(run_id)) == "BLOCKED"
+    assert adapter.implementations == 0
+
+
 def test_artifact_change_after_validation_prevents_approval(tmp_path: Path) -> None:
     loop, _ = setup(tmp_path)
     run_id = loop.create("divide", "Fix zero handling", ("zero raises",), ("calc.py",))

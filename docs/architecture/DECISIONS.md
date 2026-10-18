@@ -141,3 +141,13 @@ Estas decisões foram aceitas no escopo inicial. Mudanças futuras devem acresce
 **Decisão:** propostas, avaliações, decisões, versões e vínculos são gravados no SQLite existente pela migração posterior às migrações da Fase 5. O hash da proposta fixa o conteúdo avaliado e aprovado. O worker apenas observa e propõe; `MethodologyGovernance` exige um ator autorizado em `local_approvers` e publica em uma transação. O único operador declarativo inicial adiciona `type_check` antes de QA. O Workflow Engine pode selecionar uma definição publicada por `create_published()`. O Worker de Documentação existente renderiza RFC, avaliação, decisão e publicação a partir dos registros persistidos, com hashes e histórico imutável.
 
 **Efeito:** publicação rejeita versão-base obsoleta, dependência ausente e aprovação inválida. Repetir a mesma publicação não cria outra versão. A autenticação humana permanece local, conforme ADR-011. A adoção pelo `AdversarialLoop` e benchmarks executados pelo AEC continuam pendentes.
+
+## ADR-015: Recuperação conservadora de snapshot de implementação
+
+**Estado:** implementado em 2026-10-18.
+
+**Contexto:** o controller pode criar um commit Git depois que o workflow do agente terminou e antes de registrar o novo head no SQLite. Nesse intervalo, a execução ficava bloqueada após reinício, apesar de o resultado do agente estar persistido.
+
+**Decisão:** a retomada aceita somente um commit filho direto do head registrado, com mensagem e autoria do controller, worktree limpa, arquivos confinados aos caminhos permitidos, workflow e execução concluídos e artefatos íntegros. Ela reconstrói a linha da iteração e o head sem executar o agente novamente. Qualquer divergência permanece bloqueada.
+
+**Efeito:** uma falha entre captura e persistência é recuperável. Resultados externos incertos e commits não atribuíveis ao controller continuam exigindo inspeção humana.

@@ -73,7 +73,7 @@ Cada item tem um identificador estável para vincular issues, commits e evidênc
 - [x] F4-10 Exigir aprovação humana antes do merge. Evidência: `WAITING_APPROVAL` e teste de autorização.
 - [x] F4-11 Executar experimento completo em repositório de teste. Evidência: cenário simulado em `tests/scenarios/test_adversarial_loop.py` e [execução com quatro turnos Codex reais](engineering/REAL_CODEX_EXPERIMENT.md), encerrada em `WAITING_APPROVAL`.
 
-**Estado:** Implementador, QA, correção e validação funcionaram em uma execução real com Codex; o pedido de aprovação permaneceu pendente, sem decisão humana. Isolamento de sistema operacional e recuperação de commits após falha de persistência continuam pendentes.
+**Estado:** Implementador, QA, correção e validação funcionaram em uma execução real com Codex; o pedido de aprovação permaneceu pendente, sem decisão humana. Um teste de falha após o commit do controller confirmou recuperação sem repetir o agente. Isolamento de sistema operacional e resultados externos ainda desconhecidos continuam pendentes.
 
 ## Fase 5: documentação
 
