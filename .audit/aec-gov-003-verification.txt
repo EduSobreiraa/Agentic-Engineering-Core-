@@ -1,0 +1,19 @@
+AEC-GOV-003 — verificação local, 2026-10-20
+
+Comandos executados no workspace da Fase 7:
+- uv run ruff check . -> All checks passed!
+- uv run mypy -> Success: no issues found in 80 source files
+- uv run pytest -> 195 passed, 9 skipped in 16.83s
+
+tests/scenarios/test_full_methodology_revision.py: 9 testes aprovados.
+Cobertura de fixture: digest canônico, diff semântico, avaliação da definição exata,
+aprovação local pelo digest, publicação transacional e idempotente, alteração da
+candidata ou da evidência após avaliação, rejeição humana ainda possível após
+alteração da evidência, ausência de gate obrigatório e bloqueio da versão 1.0.2.
+O caso de publicação em fixture também confere RFC, avaliação, decisão e
+publicação renderizados pelo Documentation Worker.
+
+O teste Codex real de security-audit@1.0.3 ocorreu antes desta alteração, em
+banco temporário distinto, e chegou a WAITING_APPROVAL em 89,61 s. Não foi
+executada uma aprovação, publicação operacional, importação de evidência real,
+promoção de artefato, merge ou qualquer trabalho da Fase 8.

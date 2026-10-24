@@ -7,6 +7,7 @@ from typing import Any, Callable
 import pytest
 
 from aec.communication.broker import Broker
+from aec.communication.schemas import ArtifactRef, TaskAssigned
 from aec.execution.base import ExecutionAdapter
 from aec.execution.manager import ExecutionManager
 from aec.execution.models import ExecutionRequest, ExecutionResult, ExecutionStatus
@@ -16,7 +17,12 @@ from aec.methodology.governance import MethodologyRegistry
 from aec.security.identities import Role
 from aec.workflows.engine import TransientValidationError, WorkflowEngine
 from aec.workflows.loader import WorkflowDefinitionError, load, validate
-from aec.workflows.models import StepStatus, WorkflowDefinition, WorkflowStatus
+from aec.workflows.models import (
+    StepStatus,
+    WorkflowDefinition,
+    WorkflowStatus,
+    WorkflowTaskInput,
+)
 from aec.workflows.state_machine import check_transition
 
 
@@ -89,7 +95,13 @@ def test_create_from_published_methodology(tmp_path: Path) -> None:
         ),
         actor="bootstrap",
     )
-    run = engine.create_published(registry, definition.id, definition.version)
+    task = WorkflowTaskInput(
+        requirements="Follow the example workflow",
+        acceptance_criteria=("artifact check passes",),
+    )
+    run = engine.create_published(
+        registry, definition.id, definition.version, task_input=task
+    )
     with engine.broker.db.connect() as connection:
         binding = connection.execute(
             "SELECT version FROM methodology_run_bindings WHERE run_id=?",
@@ -104,10 +116,94 @@ def test_create_from_published_methodology(tmp_path: Path) -> None:
         )
     with pytest.raises(sqlite3.IntegrityError, match="binding failed"):
         engine.create_published(
-            registry, definition.id, definition.version, run_id="rolled-back"
+            registry,
+            definition.id,
+            definition.version,
+            run_id="rolled-back",
+            task_input=task,
         )
     with pytest.raises(KeyError):
         engine.repository.get_run("rolled-back")
+    with engine.broker.db.connect() as connection:
+        connection.execute("DROP TRIGGER reject_methodology_binding")
+        connection.execute(
+            "CREATE TRIGGER reject_workflow_input "
+            "BEFORE INSERT ON workflow_run_inputs "
+            "BEGIN SELECT RAISE(ABORT, 'input failed'); END"
+        )
+    with pytest.raises(sqlite3.IntegrityError, match="input failed"):
+        engine.create_published(
+            registry,
+            definition.id,
+            definition.version,
+            run_id="input-rolled-back",
+            task_input=task,
+        )
+    with pytest.raises(KeyError):
+        engine.repository.get_run("input-rolled-back")
+
+
+def test_published_task_input_survives_restart_and_reaches_acp(tmp_path: Path) -> None:
+    engine, _ = setup_engine(tmp_path)
+    definition = example()
+    registry = MethodologyRegistry(
+        engine.broker.db, validators=frozenset({"artifact-check"})
+    )
+    registry.seed(
+        MethodologyVersion(
+            methodology_id=definition.id,
+            version=definition.version,
+            definition=definition,
+            mandatory_gates=frozenset({"artifact-check"}),
+        ),
+        actor="bootstrap",
+    )
+    task = WorkflowTaskInput(
+        requirements="Implement integer addition",
+        acceptance_criteria=("add(2, 3) == 5",),
+        artifact_refs=(
+            ArtifactRef(
+                artifact_id="prior-spec",
+                kind="specification",
+                uri="artifact://prior-run/spec.txt",
+                sha256="a" * 64,
+                created_by="author",
+            ),
+        ),
+    )
+    run = engine.create_published(
+        registry, definition.id, definition.version, "task-input-run", task_input=task
+    )
+    restarted, adapter = setup_engine(tmp_path)
+    assert restarted.repository.task_input(run.run_id) == task
+    assert restarted.repository.definition(run.run_id) == definition
+    assert (
+        asyncio.run(restarted.run(run.run_id)).status == WorkflowStatus.WAITING_APPROVAL
+    )
+    assert all("Implement integer addition" in prompt for prompt in adapter.prompts)
+    assert all("add(2, 3) == 5" in prompt for prompt in adapter.prompts)
+    assert "prior-spec" in adapter.prompts[0]
+    assignments = [
+        message
+        for message in restarted.broker.get_history(run.run_id)
+        if message.type.value == "TASK_ASSIGNED"
+    ]
+    assert isinstance(assignments[0].payload, TaskAssigned)
+    assert assignments[0].payload.instructions == adapter.prompts[0]
+    assert assignments[0].artifact_refs == []
+    with restarted.broker.db.connect() as connection:
+        with pytest.raises(sqlite3.IntegrityError, match="immutable"):
+            connection.execute(
+                "UPDATE workflow_run_inputs SET content='changed' WHERE run_id=?",
+                (run.run_id,),
+            )
+        connection.execute("DROP TRIGGER workflow_run_inputs_no_update")
+        connection.execute(
+            "UPDATE workflow_run_inputs SET content='changed' WHERE run_id=?",
+            (run.run_id,),
+        )
+    with pytest.raises(RuntimeError, match="hash mismatch"):
+        restarted.repository.task_input(run.run_id)
 
 
 def test_complete_persisted_workflow_and_recovery(tmp_path: Path) -> None:

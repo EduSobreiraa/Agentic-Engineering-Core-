@@ -89,6 +89,7 @@ def test_capture_rejects_out_of_scope_change(tmp_path: Path) -> None:
 
     subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
     (tmp_path / "allowed.py").write_text("pass\n")
+    (tmp_path / ".gitignore").write_text("__pycache__/\n")
     subprocess.run(["git", "-C", str(tmp_path), "add", "."], check=True)
     subprocess.run(
         [
@@ -107,6 +108,12 @@ def test_capture_rejects_out_of_scope_change(tmp_path: Path) -> None:
     )
     assert len(commit_hash(tmp_path)) == 40
     (tmp_path / "other.py").write_text("pass\n")
+    with pytest.raises(PermissionError):
+        capture(tmp_path, ("allowed.py",))
+    (tmp_path / "other.py").unlink()
+    cache = tmp_path / "__pycache__"
+    cache.mkdir()
+    (cache / "allowed.pyc").write_bytes(b"temporary")
     with pytest.raises(PermissionError):
         capture(tmp_path, ("allowed.py",))
 

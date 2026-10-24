@@ -5,6 +5,10 @@ from abc import ABC, abstractmethod
 from .models import ExecutionRequest, ExecutionResult
 
 
+class ProcessObservationError(RuntimeError):
+    """A spawned process could not be linked to durable execution state."""
+
+
 class ExecutionAdapter(ABC):
     @abstractmethod
     async def execute(

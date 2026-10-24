@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 from datetime import datetime
 from enum import StrEnum
@@ -71,6 +73,38 @@ class MethodologyVersion(Contract):
         return self
 
 
+def methodology_digest(version: MethodologyVersion) -> str:
+    """Hash the complete published contract with stable set ordering."""
+    content = version.model_dump(mode="json")
+    content["mandatory_gates"] = sorted(version.mandatory_gates)
+    content["required_documents"] = sorted(version.required_documents)
+    canonical = json.dumps(content, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode()).hexdigest()
+
+
+ChangeCategory = Literal["agent", "gate", "permission", "transition", "state", "limit"]
+
+
+class SemanticChange(Contract):
+    category: ChangeCategory
+    subject: str
+    before: str | None
+    after: str | None
+
+
+class RevisionCheck(Contract):
+    name: Annotated[str, Field(min_length=1)]
+    passed: bool
+    evidence: Annotated[str, Field(min_length=1)]
+
+
+class RevisionVerification(Contract):
+    candidate_sha256: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
+    evidence_refs: tuple[str, ...] = Field(min_length=1)
+    checks: tuple[RevisionCheck, ...] = Field(min_length=1)
+    limitations: tuple[str, ...] = ()
+
+
 class MethodologyObservation(Contract):
     run_id: str
     task_id: str
@@ -129,6 +163,7 @@ class MethodologyFinding(Contract):
 
 
 class MethodologyProposal(Contract):
+    kind: Literal["QUALITY_GATE", "METHODOLOGY_REVISION"] = "QUALITY_GATE"
     proposal_id: Annotated[str, Field(pattern=r"^[A-Za-z0-9_-]+$")]
     methodology_id: Annotated[str, Field(pattern=r"^[A-Za-z0-9_-]+$")]
     base_version: str
@@ -136,7 +171,9 @@ class MethodologyProposal(Contract):
     problem: Annotated[str, Field(min_length=1)]
     hypothesis: Annotated[str, Field(min_length=1)]
     evidence_refs: tuple[str, ...] = Field(min_length=1)
-    changes: tuple[Change, ...] = Field(min_length=1)
+    changes: tuple[Change, ...] = ()
+    revision: MethodologyVersion | None = None
+    candidate_sha256: str | None = None
     expected_metric: Annotated[str, Field(min_length=1)]
     expected_direction: Literal["increase", "decrease"]
     risks: Annotated[str, Field(min_length=1)]
@@ -156,6 +193,17 @@ class MethodologyProposal(Contract):
             raise ValueError("proposed version must increase")
         if len(set(self.evidence_refs)) != len(self.evidence_refs):
             raise ValueError("duplicate evidence reference")
+        if self.kind == "METHODOLOGY_REVISION":
+            if (
+                self.changes
+                or self.revision is None
+                or (self.revision.methodology_id, self.revision.version)
+                != (self.methodology_id, self.proposed_version)
+                or self.candidate_sha256 != methodology_digest(self.revision)
+            ):
+                raise ValueError("revision must match its exact candidate digest")
+        elif not self.changes or self.revision is not None or self.candidate_sha256:
+            raise ValueError("quality gate proposal requires only gate changes")
         return self
 
 
@@ -204,6 +252,10 @@ class MethodologyEvaluation(Contract):
     evaluation_id: str
     proposal_id: str
     proposal_sha256: str
+    candidate_sha256: str | None = None
+    evidence_sha256: str | None = None
+    semantic_diff: tuple[SemanticChange, ...] = ()
+    revision_checks: tuple[RevisionCheck, ...] = ()
     verdict: EvaluationVerdict
     checks: tuple[str, ...]
     limitations: tuple[str, ...]
@@ -217,6 +269,7 @@ class MethodologyEvaluation(Contract):
 class MethodologyApproval(Contract):
     proposal_id: str
     proposal_sha256: str
+    candidate_sha256: str | None = None
     actor: str
     decided_at: datetime
     decision: Literal["APPROVED", "REJECTED", "CHANGES_REQUESTED"]

@@ -1,0 +1,43 @@
+AEC-RES-002 — verificação local em 2026-10-20
+
+Experimento real controlado anterior ao ajuste final do callback:
+- Diretório temporário descartável, Codex somente leitura, uma invocação.
+- Manager encerrado com SIGKILL após persistir PID/PGID.
+- Codex permaneceu ativo; novo manager registrou INTERRUPTED e bloqueou a admissão no workspace.
+- Saída observada: codex_alive_after_manager_sigkill=True,
+  execution_interrupted=True, workspace_quarantined=True,
+  process_identity_persisted=True; depois da limpeza, processo ausente.
+- O grupo do ensaio foi encerrado explicitamente ao final. Não houve repetição do turno.
+
+Regressão real após o ajuste final do callback:
+- AEC_RUN_REAL_CODEX_SIGKILL=1 timeout 90s uv run pytest -q
+  tests/scenarios/test_real_codex_opt_in.py::test_real_manager_sigkill_quarantines_workspace:
+  1 passed in 0.15s. O teste usa diretório temporário, um Codex real somente
+  leitura e pausa o manager depois de registrar o PID e antes de enviar o prompt.
+  Confere /proc/PID/comm=codex, PID, PGID, boot ID e start_ticks; encerra o manager
+  por SIGKILL; confirma Codex ainda ativo com a mesma identidade, recuperação
+  INTERRUPTED, bloqueio de novo turno sem registro de execução e recusa de
+  reconciliação com grupo ativo. O grupo identificado é encerrado no finally,
+  com escalonamento para SIGKILL se necessário. Não há inferência demonstrada.
+- AEC_RUN_REAL_CODEX=1 timeout 120s uv run pytest -q
+  tests/scenarios/test_real_codex_opt_in.py::test_real_two_agent_exchange:
+  1 passed em execução anterior. Dois processos Codex reais tiveram identidade
+  persistida após o ajuste do callback.
+- A suíte padrão inclui SIGKILL com executor simulado, adapter registrado
+  tardiamente, filho no grupo após saída do principal, falha ao persistir PID,
+  bloqueio de liberação com grupo ativo, boot antigo e start_ticks divergentes.
+  Boot antigo permite reconciliação somente com inspeção humana; start_ticks
+  divergente no mesmo boot mantém bloqueio se o grupo ainda existir.
+  A liberação exige atestado local e registra efeitos VERIFIED, REVERTED ou UNKNOWN.
+- uv run ruff check .: All checks passed!
+- uv run mypy: Success: no issues found in 79 source files.
+- uv run pytest -q: 186 passed, 9 skipped in 16.97s.
+- git diff --check: sem erros.
+
+Limites: o teste real interrompe o manager antes de enviar o prompt; verifica
+supervisão e recuperação, não o resultado de uma chamada de inferência. Boot ID
+distingue reinicializações; start_ticks auxilia a inspeção, sem liberar
+automaticamente um grupo ainda presente no mesmo boot. PID/PGID podem ser
+reutilizados e descendentes podem sair do grupo. A inspeção humana continua obrigatória
+para liberar a quarentena. Não houve reboot real; o cenário foi simulado.
+Este controle não é sandbox nem supervisão completa por cgroup.

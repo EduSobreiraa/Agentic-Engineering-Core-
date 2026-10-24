@@ -1,0 +1,14 @@
+uv run ruff check .
+All checks passed!
+
+uv run mypy
+Success: no issues found in 79 source files
+
+uv run pytest -q
+........................................................................ [ 40%]
+...................ssssssss............................................. [ 81%]
+................................                                         [100%]
+168 passed, 8 skipped in 13.78s
+
+git diff --check
+(no output)

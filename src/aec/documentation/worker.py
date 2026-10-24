@@ -6,7 +6,7 @@ import hashlib
 import json
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, Literal
+from typing import Callable, Literal, cast
 
 from aec.communication.broker import Broker
 from aec.communication.errors import ConflictError
@@ -18,9 +18,14 @@ from aec.communication.schemas import (
     Message,
     MessageType,
 )
+from aec.methodologies.arena import arena_comparison
+from aec.methodologies.static_audit import audit_snapshot
 from aec.methodology.contracts import MethodologyEvaluation, ProposalStatus
-from aec.methodology.governance import ProposalStore
+from aec.methodology.governance import MethodologyRegistry, ProposalStore
 from aec.security.identities import Identity, Role
+from aec.workflows.loader import definition_hash
+from aec.workflows.models import WorkflowDefinition
+from aec.workflows.repository import WorkflowRepository
 
 from .collector import DocumentationCollector
 from .renderer import (
@@ -28,7 +33,15 @@ from .renderer import (
     execution_report,
     methodology_document,
     qa_summary,
+    safe,
 )
+
+WORKFLOW_REPORTS = {
+    "implementation-arena": "arena-report",
+    "tdd-adversarial": "tdd-report",
+    "security-audit": "security-audit-report",
+    "decision-adversarial": "decision-report",
+}
 
 
 class DocumentationWorker:
@@ -63,6 +76,180 @@ class DocumentationWorker:
             raise ValueError("document integrity failed")
         return content
 
+    def _workflow_report(self, run_id: str, document_type: str) -> str:
+        with self.broker.db.connect() as db:
+            run = db.execute(
+                "SELECT * FROM workflow_runs WHERE run_id=?", (run_id,)
+            ).fetchone()
+            binding = db.execute(
+                "SELECT * FROM methodology_run_bindings WHERE run_id=?", (run_id,)
+            ).fetchone()
+            steps = db.execute(
+                "SELECT * FROM workflow_steps WHERE run_id=? ORDER BY step_id",
+                (run_id,),
+            ).fetchall()
+            approvals = db.execute(
+                "SELECT step_id,status,decided_by FROM workflow_approvals "
+                "WHERE run_id=? ORDER BY step_id",
+                (run_id,),
+            ).fetchall()
+            published = (
+                db.execute(
+                    "SELECT sha256 FROM methodology_versions WHERE methodology_id=? "
+                    "AND version=?",
+                    (binding["methodology_id"], binding["version"]),
+                ).fetchone()
+                if binding
+                else None
+            )
+        if run is None or binding is None or published is None:
+            raise ValueError("published workflow run required")
+        definition = WorkflowDefinition.model_validate_json(run["definition"])
+        registered = MethodologyRegistry(self.broker.db).get(
+            binding["methodology_id"], binding["version"]
+        )
+        if (
+            definition_hash(definition) != run["definition_hash"]
+            or definition_hash(registered.definition) != run["definition_hash"]
+            or published["sha256"] != binding["sha256"]
+            or WORKFLOW_REPORTS.get(binding["methodology_id"]) != document_type
+        ):
+            raise ValueError("workflow report source mismatch")
+        by_id = {step.id: step for step in definition.steps}
+        lines = [
+            f"# {safe(document_type)}",
+            "",
+            f"Execução: {safe(run_id)}",
+            "Metodologia: "
+            f"{safe(binding['methodology_id'])}@{safe(binding['version'])}",
+            f"Definição SHA-256: {safe(run['definition_hash'])}",
+            f"Estado: {safe(run['status'])}",
+            "",
+        ]
+        task_input = WorkflowRepository(self.broker.db).task_input(run_id)
+        if task_input is not None:
+            lines.extend(
+                [
+                    "## Entrada da tarefa",
+                    "",
+                    f"Requisitos: {safe(task_input.requirements)}",
+                    "Critérios de aceite: "
+                    + safe(json.dumps(task_input.acceptance_criteria)),
+                    "Referências de artefatos: "
+                    + safe(
+                        json.dumps(
+                            [
+                                ref.model_dump(mode="json")
+                                for ref in task_input.artifact_refs
+                            ],
+                            sort_keys=True,
+                        )
+                    ),
+                    "",
+                ]
+            )
+        lines.extend(["## Etapas e evidências", ""])
+        for step in steps:
+            kind = by_id[step["step_id"]].type
+            result = json.loads(step["result"]) if step["result"] else {}
+            evidence = (
+                f"resultado do validador={result.get('passed', 'indisponível')}"
+                if kind == "validation"
+                else "saída declarada pelo agente="
+                + safe(result.get("output", "indisponível"))
+                if kind == "agent"
+                else "decisão humana pendente ou registrada abaixo"
+            )
+            lines.append(
+                f"- {safe(step['step_id'])}: {safe(step['status'])}; {evidence}"
+            )
+        lines.extend(["", "## Aprovações", ""])
+        lines.extend(
+            f"- {safe(item['step_id'])}: {safe(item['status'])} por "
+            f"{safe(item['decided_by'] or 'ninguém')}"
+            for item in approvals
+        )
+        lines.extend(["", "Sem aprovação registrada"] if not approvals else [])
+        if definition.metadata.get("approval_binding") == "audit_artifact":
+            with self.broker.db.connect() as db:
+                snapshot_exists = (
+                    db.execute(
+                        "SELECT 1 FROM audit_artifact_snapshots WHERE run_id=?",
+                        (run_id,),
+                    ).fetchone()
+                    is not None
+                )
+            if not snapshot_exists and run["status"] == "FAILED":
+                lines.extend(["", "## Artefato validado", "", "Não produzido."])
+                return "\n".join(lines) + "\n"
+            manifest, _, manifest_digest = audit_snapshot(self.broker.db, run_id)
+            if (
+                manifest["definition_hash"] != run["definition_hash"]
+                or manifest["methodology_id"] != binding["methodology_id"]
+                or manifest["version"] != binding["version"]
+                or manifest["methodology_sha256"] != binding["sha256"]
+            ):
+                raise ValueError("audit snapshot and methodology do not match")
+            approval_binding = WorkflowRepository(self.broker.db).approval_binding(
+                run_id, "approval"
+            )
+            if approval_binding is not None and approval_binding != (
+                manifest_digest,
+                run["definition_hash"],
+                binding["methodology_id"],
+                binding["version"],
+                binding["sha256"],
+            ):
+                raise ValueError("audit approval does not match the snapshot")
+            lines.extend(
+                [
+                    "",
+                    "## Artefato validado",
+                    "",
+                    f"Manifest SHA-256: {safe(manifest_digest)}",
+                    f"Arquivo: {safe(manifest['path'])}",
+                    f"Arquivo SHA-256: {safe(manifest['content_sha256'])}",
+                    f"Commit validado: {safe(manifest['commit'])}",
+                    "Aprovação vinculada: "
+                    + safe(approval_binding[0] if approval_binding else "pendente"),
+                ]
+            )
+        if document_type == "arena-report":
+            comparison = arena_comparison(self.broker.db, run_id)
+            lines.extend(
+                [
+                    "",
+                    "## Comparação",
+                    "",
+                    f"Especificação: {safe(comparison['specification'])}",
+                    f"Critérios: {safe(json.dumps(comparison['criteria']))}",
+                    f"Commit-base: {safe(comparison['base_commit'])}",
+                    f"Vencedor: {safe(comparison['winner'] or 'nenhum')}",
+                    f"Estado do QA: {safe(comparison['qa_status'] or 'não executado')}",
+                    f"QA aprovado: {safe(comparison['qa_passed'])}",
+                    "",
+                ]
+            )
+            for candidate in cast(list[dict[str, object]], comparison["candidates"]):
+                lines.append(
+                    f"- {safe(candidate['agent'])}: commit "
+                    f"{safe(candidate['commit'] or 'nenhum')}; "
+                    f"gates {safe(json.dumps(candidate['gates'], sort_keys=True))}; "
+                    f"erro {safe(candidate['error'] or 'nenhum')}"
+                )
+                if candidate.get("benchmark"):
+                    lines.append(
+                        "  Tempo e memória por amostra: "
+                        + safe(json.dumps(candidate["benchmark"], sort_keys=True))
+                    )
+                if candidate.get("benchmark_error"):
+                    lines.append(
+                        "  Falha de medição: " + safe(candidate["benchmark_error"])
+                    )
+            if comparison.get("selection_rule"):
+                lines.append("Regra de seleção: " + safe(comparison["selection_rule"]))
+        return "\n".join(lines) + "\n"
+
     def create_methodology_document(
         self,
         proposal_id: str,
@@ -72,7 +259,8 @@ class DocumentationWorker:
         proposal, status, proposal_sha = ProposalStore(self.broker.db).get(proposal_id)
         with self.broker.db.connect() as db:
             row = db.execute(
-                "SELECT evaluation,approval_by,approval_at FROM methodology_proposals "
+                "SELECT evaluation,approval_by,approval_at,approval_candidate_sha256 "
+                "FROM methodology_proposals "
                 "WHERE proposal_id=?",
                 (proposal_id,),
             ).fetchone()
@@ -109,6 +297,13 @@ class DocumentationWorker:
                     ("Reversão", proposal.rollback_plan),
                 ]
             )
+            if proposal.kind == "METHODOLOGY_REVISION":
+                fields.extend(
+                    [
+                        ("Tipo", "Revisão completa"),
+                        ("Digest da candidata", str(proposal.candidate_sha256)),
+                    ]
+                )
         elif kind == "evaluation":
             if row is None or not row["evaluation"]:
                 raise ValueError("evaluation has not been recorded")
@@ -129,6 +324,21 @@ class DocumentationWorker:
                     ),
                 ]
             )
+            if proposal.kind == "METHODOLOGY_REVISION":
+                fields.extend(
+                    [
+                        ("Digest da candidata", str(evaluation.candidate_sha256)),
+                        ("Digest das evidências", str(evaluation.evidence_sha256)),
+                        (
+                            "Diff semântico",
+                            "; ".join(
+                                f"{change.category}:{change.subject} "
+                                f"{change.before} -> {change.after}"
+                                for change in evaluation.semantic_diff
+                            ),
+                        ),
+                    ]
+                )
         elif kind == "decision":
             if (
                 row is None
@@ -155,6 +365,10 @@ class DocumentationWorker:
                     ("Data", str(row["approval_at"])),
                 ]
             )
+            if proposal.kind == "METHODOLOGY_REVISION":
+                fields.append(
+                    ("Digest aprovado", str(row["approval_candidate_sha256"]))
+                )
         elif kind == "publication":
             if status != ProposalStatus.PUBLISHED or publication is None:
                 raise ValueError("methodology has not been published")
@@ -297,6 +511,7 @@ class DocumentationWorker:
             "execution-report",
             "qa-summary",
             "change-summary",
+            *WORKFLOW_REPORTS.values(),
         }:
             raise ValueError("document type requires supervised authoring")
         with self.broker.db.connect() as db:
@@ -319,8 +534,13 @@ class DocumentationWorker:
                 warnings=json.loads(prior["warnings"]),
                 timestamp=datetime.fromisoformat(prior["created_at"]),
             )
-        evidence = self.collector.collect(request.run_id, request.task_id)
-        if evidence.status == "APPROVED":
+        workflow_report = request.documentation_type in WORKFLOW_REPORTS.values()
+        evidence = (
+            None
+            if workflow_report
+            else self.collector.collect(request.run_id, request.task_id)
+        )
+        if evidence is not None and evidence.status == "APPROVED":
             final = evidence.iterations[-1] if evidence.iterations else None
             if (
                 not any(
@@ -336,21 +556,25 @@ class DocumentationWorker:
                 or any(gate.status != "PASSED" for gate in final.gates)
             ):
                 raise ValueError("approved run lacks verified final evidence")
-        source_refs = list(evidence.source_refs)
+        source_refs = [] if evidence is None else list(evidence.source_refs)
         if any(not self.collector.artifact_intact(ref) for ref in source_refs):
             raise ValueError("source artifact is missing or has an invalid hash")
         for ref in request.artifact_refs:
             if ref not in source_refs or not self.collector.artifact_intact(ref):
                 raise ValueError("requested artifact is missing or unverified")
         document_id = hashlib.sha256(message.message_id.encode()).hexdigest()
-        content = (
-            execution_report(evidence, document_id)
-            if request.documentation_type == "execution-report"
-            else {
-                "qa-summary": qa_summary,
-                "change-summary": change_summary,
-            }[request.documentation_type](evidence)
-        )
+        if workflow_report:
+            content = self._workflow_report(request.run_id, request.documentation_type)
+        else:
+            assert evidence is not None
+            content = (
+                execution_report(evidence, document_id)
+                if request.documentation_type == "execution-report"
+                else {
+                    "qa-summary": qa_summary,
+                    "change-summary": change_summary,
+                }[request.documentation_type](evidence)
+            )
         artifact_id = f"{document_id}.md"
         digest = hashlib.sha256(content.encode()).hexdigest()
         ref = ArtifactRef(
@@ -376,7 +600,9 @@ class DocumentationWorker:
                 ) from None
         timestamp = datetime.now(timezone.utc)
         validation: Literal["VALID", "VALID_WITH_WARNINGS", "INVALID"] = (
-            "VALID_WITH_WARNINGS" if evidence.warnings else "VALID"
+            "VALID_WITH_WARNINGS"
+            if evidence is not None and evidence.warnings
+            else "VALID"
         )
         with self.broker.db.connect() as db:
             db.execute("BEGIN IMMEDIATE")
@@ -401,7 +627,7 @@ class DocumentationWorker:
                             [item.model_dump(mode="json") for item in source_refs]
                         ),
                         validation,
-                        json.dumps(evidence.warnings),
+                        json.dumps(evidence.warnings if evidence is not None else []),
                         timestamp.isoformat(),
                     ),
                 )
@@ -416,7 +642,7 @@ class DocumentationWorker:
             generated_artifact_ref=ref,
             source_refs=source_refs,
             validation_status=validation,
-            warnings=list(evidence.warnings),
+            warnings=list(evidence.warnings) if evidence is not None else [],
             timestamp=timestamp,
         )
 
@@ -429,7 +655,13 @@ def request_documentation(
     task_id: str,
     *,
     documentation_type: Literal[
-        "execution-report", "qa-summary", "change-summary"
+        "execution-report",
+        "qa-summary",
+        "change-summary",
+        "arena-report",
+        "tdd-report",
+        "security-audit-report",
+        "decision-report",
     ] = "execution-report",
     correlation_id: str | None = None,
     artifact_refs: list[ArtifactRef] | None = None,

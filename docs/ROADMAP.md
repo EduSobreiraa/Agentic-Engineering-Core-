@@ -105,16 +105,32 @@ Cada item tem um identificador estável para vincular issues, commits e evidênc
 - [x] F6H-03 Segurança operacional (P0). Política explícita de raízes locais confiáveis nos pontos de execução. Projetos externos não declarados são bloqueados. O limite do controle está em `docs/execution/SECURITY.md`.
 - [x] F6H-04 Identidade remota (P2). Requisitos registrados em `docs/methodology-worker/GOVERNANCE.md`; implementação de rede permanece fora do escopo.
 
-O [prompt de fechamento](methodology-worker/PHASE_6_CLOSURE_PROMPT.md) detalha o escopo e os critérios de aceite. A Fase 7 permanece sem implementação nesta branch.
+O [prompt de fechamento](methodology-worker/PHASE_6_CLOSURE_PROMPT.md) detalha o escopo e os critérios de aceite.
 
 ## Fase 7: expansão metodológica
 
-- [ ] F7-01 Implementar Implementation Arena.
-- [ ] F7-02 Implementar TDD com agentes especializados.
-- [ ] F7-03 Implementar auditoria técnica Red Team e Blue Team.
-- [ ] F7-04 Implementar decisão adversarial.
-- [ ] F7-05 Integrar skills pstack de forma opcional, após verificar disponibilidade e contratos.
-- [ ] F7-06 Selecionar metodologias automaticamente por regras.
+- [x] F7-01 Implementar Implementation Arena para projetos locais confiáveis. A versão publicada `1.0.1` mediu cinco amostras alternadas de tempo e memória com Codex real: empate entre soluções válidas e seleção por falha de gate controlada, seguida de QA real e aprovação do run pendente. Superioridade natural por desempenho ainda não foi demonstrada; código não confiável continua bloqueado.
+- [x] F7-02 Implementar TDD com agentes especializados. A versão publicada `1.0.1` percorreu Red, Green, Refactor, regressão e QA com Codex real; `TDDChecks` preserva os testes e captura o commit imutável quando configurado com caminhos permitidos. O run real permaneceu em `WAITING_APPROVAL`.
+- [x] F7-03 Implementar auditoria técnica estática Red Team e Blue Team em fixture local confiável. A versão publicada `1.0.3` percorreu finding, correção e reteste na mesma execução Codex; AEC-SEC-001 vincula aprovação e conclusão ao snapshot. `1.0.2` permanece bloqueada. Testes perigosos aguardam sandbox.
+- [x] F7-04 Implementar decisão adversarial. A versão publicada `1.0.1` percorreu proposta, contestação, avaliação e ADR proposto com Codex real; a decisão do run real permaneceu pendente.
+- [x] F7-05 Preparar interface opcional de skills externas. Referência local explícita com hash implementada; execução ou importação automática de skills não fazem parte deste marco.
+- [x] F7-06 Selecionar metodologias automaticamente por regras. Router determinístico consulta versões publicadas, dependências, recursos e política de escopo; testes com fixtures em `tests/unit/test_methodology_routing.py`.
+- [x] F7-07 Persistir entradas dos workflows publicados. Requisitos, critérios e referências são gravados com hash na criação atômica, recuperados após reinício e incluídos em prompts ACP e relatórios; referências externas exigem verificação de integridade antes de uso.
+- [x] F7-08 Validar desenvolvimento adversarial local com Codex real. Implementador, gates e QA chegaram a `WAITING_APPROVAL` em repositório descartável; nenhuma aprovação ou merge foi realizado. A Arena real validou o ramo de empate.
+
+**Estado da Fase 7:** escopo funcional local supervisionado concluído; diagnóstico, ensaios reais, propostas publicadas e limites estão em [PHASE_7.md](methodologies/PHASE_7.md). A segurança operacional ampliada continua bloqueada sem sandbox de sistema operacional e identidade remota. Nenhuma aprovação de run ou merge foi inferida da publicação das metodologias.
+
+**Marco A — funcional local supervisionado:** o TOCTOU da auditoria tornou `security-audit@1.0.2` inadequada para publicação. AEC-SEC-001 adiciona commit, snapshot imutável e vínculo do digest à aprovação e à conclusão em `1.0.3`. As quatro revisões da Fase 7 foram aprovadas pela identidade local autorizada e publicadas pelo Registry. AEC-RES-002 demonstrou recuperação conservadora após `SIGKILL` real do manager; isso não prova isolamento de código não confiável.
+
+**AEC-RES-002 — reconciliação de processos:** [x] regressão real final em diretório descartável confirmou Codex ativo após `SIGKILL`, identidade completa persistida, recuperação `INTERRUPTED`, bloqueio de novo turno e recusa de reconciliação com grupo ativo. [x] callback por pedido cobre adapters tardios; filho remanescente e falha de registro mantêm quarentena. [x] simulação de reboot preserva inspeção obrigatória; PID reutilizado no mesmo boot mantém bloqueio conservador. A reconciliação registra operador, evidência e estado dos efeitos externos. [ ] validar supervisão confiável da árvore completa e encerramento por cgroup ou escopo equivalente antes de automatizar terminação; descendentes fora do grupo e identidade remota continuam fora da garantia.
+
+**AEC-GOV-003 — revisão metodológica completa:** [x] contrato com candidata integral e digest canônico, diff semântico, checks independentes, vínculo com execuções e evidências persistidas, aprovação local pelo digest e publicação transacional. [x] testes de alteração da candidata e da evidência após avaliação, identidade não autorizada, versão bloqueada e publicação idempotente em banco descartável. AEC-PUB-004 publicou `security-audit@1.0.3` após autorização explícita do usuário e conferência da evidência externa.
+
+**AEC-PUB-004/005 — publicação local:** [x] ensaios Codex em repositórios descartáveis preservados; [x] registro por referência verificável da origem, sem cópia direta de linhas SQLite; [x] propostas avaliadas e documentadas no banco local persistente; [x] decisão humana vinculada ao digest e publicação transacional das quatro revisões; [x] regressão após publicação, com 201 testes aprovados e 11 opt-in pulados. A origem e os projetos Git precisam permanecer acessíveis para novas conferências das evidências externas.
+
+**Marco B — segurança operacional ampliada:** sandbox de sistema operacional, testes adversariais perigosos e identidade remota continuam bloqueados e não são requisitos para ensaios locais confiáveis do Marco A.
+
+**Hardening local após a Fase 7:** [x] modo opcional de supervisão por scope `systemd --user`, com referência persistida antes do lançamento, consulta fail-closed, teste de filho fora do PGID, `SIGKILL` do manager e turno Codex real somente leitura. [x] gateway local por socket Unix com identidade derivada de `SO_PEERCRED` e permissões por ação, testado com fixtures. [ ] implantação do gateway sob conta de serviço separada, com proteção do SQLite e artefatos, e execução dos agentes sem acesso ao UID/socket do aprovador; o ambiente atual não demonstra essa separação. [ ] sandbox para código não confiável e autenticação remota. Evidência: `.audit/local-supervision-verification.txt`.
 
 ## Fase 8: integrações e observabilidade
 

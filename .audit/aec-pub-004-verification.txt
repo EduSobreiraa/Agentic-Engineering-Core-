@@ -1,0 +1,33 @@
+AEC-PUB-004 — preparação local da proposta, 2026-10-20
+
+Ensaio real autorizado:
+  AEC_RUN_REAL_CODEX=1 timeout 480s uv run pytest -q
+    tests/scenarios/test_phase7_workflows.py::test_real_static_audit_and_safe_fixture_correction
+    --basetemp .audit/aec-pub-004/real-run
+  Resultado: 1 passed in 87.07s; workflow real-static-audit em WAITING_APPROVAL.
+  Origem preservada: .audit/aec-pub-004/real-run/test_real_static_audit_and_saf0/
+
+Registro operacional local:
+  Banco: .audit/aec-pub-004/operational.sqlite
+  Proposta: AEC-PUB-004-SECURITY-AUDIT-103
+  Referência: aec-pub-004-real-audit
+  Digest da candidata: b5eb70c34789c7a6fb7cc432420601076d5a4447bde13bb1d4af15e79dc68cc8
+  Digest da origem registrada: 8ec8d8efde543156f2338e030d0b98b59ce074c6835b516224077a9c1165058d
+  Digest consolidado da avaliação: 140a86dd898d146498892c1c250d8350f1220a3f06dc0b0a4028adb649622d79
+  Veredito: PASS_WITH_WARNINGS
+  Estado: AWAITING_APPROVAL; approval_by=NULL; versão ativa=1.0.0
+  RFC documental: aca2380b6a8ea06f59d76387782e0fb8c53a0d505a483c4896015278b2c08057
+  Avaliação documental: a2d8d877fa8c775b5b22d0624ea4bd5c820426d65780d7c894d31e47b215811b
+  Releitura final: os dois documentos passaram em get_document(); referência
+    externa reconferida, approval_by=NULL e somente a versão 1.0.0 publicada.
+
+Gates após as alterações:
+  uv run ruff check . -> All checks passed!
+  uv run mypy -> Success: no issues found in 80 source files
+  uv run pytest -> 196 passed, 9 skipped in 17.07s
+
+O teste novo registra uma evidência externa válida em bancos separados e demonstra
+que adulterar o artefato após avaliação bloqueia aprovação. Nenhuma aprovação,
+publicação, merge, promoção do arquivo corrigido ou trabalho da Fase 8 foi feito.
+O banco de origem e o projeto Git devem continuar disponíveis e íntegros para a
+decisão e eventual publicação.

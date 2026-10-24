@@ -8,26 +8,48 @@ import os
 import re
 import shutil
 import signal
+import sys
 from datetime import datetime, timezone
+from math import ceil
+from uuid import uuid4
 
-from aec.execution.base import ExecutionAdapter
+from aec.execution.base import ExecutionAdapter, ProcessObservationError
 from aec.execution.models import ExecutionRequest, ExecutionResult, ExecutionStatus
 from aec.execution.policy import ExecutionPolicy
 
 
 class CodexCliAdapter(ExecutionAdapter):
     def __init__(
-        self, executable: str | None = None, *, policy: ExecutionPolicy
+        self, executable: str | None = None, *, policy: ExecutionPolicy,
+        supervise_with_systemd: bool = False,
     ) -> None:
         self.executable = executable or shutil.which("codex")
         self.policy = policy
+        self.supervise_with_systemd = supervise_with_systemd
         self._running: dict[str, asyncio.subprocess.Process] = {}
+        self._scope_names: dict[str, str] = {}
         self._cancelled: set[str] = set()
 
     async def healthcheck(self) -> bool:
         if self.executable is None:
             return False
+        if self.supervise_with_systemd and (
+            sys.platform != "linux"
+            or shutil.which("systemd-run") is None
+            or shutil.which("systemctl") is None
+        ):
+            return False
         try:
+            if self.supervise_with_systemd:
+                manager = await asyncio.create_subprocess_exec(
+                    "systemctl", "--user", "show", "basic.target",
+                    "-p", "LoadState",
+                    stdout=asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.DEVNULL,
+                )
+                await asyncio.wait_for(manager.wait(), 5)
+                if manager.returncode != 0:
+                    return False
             version = await asyncio.create_subprocess_exec(
                 self.executable,
                 "--version",
@@ -103,8 +125,26 @@ class CodexCliAdapter(ExecutionAdapter):
         if process is None:
             return False
         self._cancelled.add(execution_id)
+        if self.supervise_with_systemd:
+            await self._stop_scope(self._scope_names[execution_id])
         await self._stop(process)
         return True
+
+    @staticmethod
+    def _scope_name() -> str:
+        return f"aec-{uuid4().hex}{uuid4().hex}.scope"
+
+    @staticmethod
+    async def _stop_scope(unit_name: str) -> None:
+        try:
+            stop = await asyncio.create_subprocess_exec(
+                "systemctl", "--user", "stop", unit_name,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            await asyncio.wait_for(stop.wait(), 5)
+        except (OSError, asyncio.TimeoutError):
+            pass
 
     async def execute(
         self, request: ExecutionRequest, provider_session_id: str | None = None
@@ -113,7 +153,10 @@ class CodexCliAdapter(ExecutionAdapter):
         if self.executable is None:
             raise FileNotFoundError("Codex CLI is not installed")
         self.policy.require(request.working_directory)
+        scope_name: str | None = None
         args = [
+            "env",
+            "PYTHONDONTWRITEBYTECODE=1",
             self.executable,
             "exec",
             "--json",
@@ -125,6 +168,18 @@ class CodexCliAdapter(ExecutionAdapter):
             args.extend(["resume", provider_session_id, "-"])
         else:
             args.append("-")
+        if self.supervise_with_systemd:
+            if request._scope_observer is None:
+                raise ProcessObservationError("scope persistence is required")
+            scope_name = self._scope_name()
+            request._scope_observer(request.execution_id, scope_name)
+            args = [
+                "systemd-run", "--user", "--scope", "--quiet",
+                f"--unit={scope_name}",
+                "--property=KillMode=control-group",
+                f"--property=RuntimeMaxSec={ceil(request.timeout_seconds) + 5}s",
+                *args,
+            ]
         process = await asyncio.create_subprocess_exec(
             *args,
             cwd=request.working_directory,
@@ -134,7 +189,19 @@ class CodexCliAdapter(ExecutionAdapter):
             start_new_session=True,
         )
         self._running[request.execution_id] = process
+        if scope_name is not None:
+            self._scope_names[request.execution_id] = scope_name
         try:
+            if request._process_observer is not None:
+                try:
+                    request._process_observer(request.execution_id, process.pid)
+                except Exception as exc:
+                    if scope_name is not None:
+                        await self._stop_scope(scope_name)
+                    await self._stop(process)
+                    raise ProcessObservationError(
+                        "process identity could not be persisted"
+                    ) from exc
             try:
                 stdout_bytes, stderr_bytes = await asyncio.wait_for(
                     process.communicate(request.prompt.encode()),
@@ -146,6 +213,8 @@ class CodexCliAdapter(ExecutionAdapter):
                     else ExecutionStatus.FAILED
                 )
             except asyncio.TimeoutError:
+                if scope_name is not None:
+                    await self._stop_scope(scope_name)
                 await self._stop(process)
                 stdout_bytes, stderr_bytes = b"", b""
                 status = ExecutionStatus.TIMED_OUT
@@ -183,8 +252,11 @@ class CodexCliAdapter(ExecutionAdapter):
                 stderr=stderr,
             )
         except asyncio.CancelledError:
+            if scope_name is not None:
+                await self._stop_scope(scope_name)
             await self._stop(process)
             raise
         finally:
             self._running.pop(request.execution_id, None)
+            self._scope_names.pop(request.execution_id, None)
             self._cancelled.discard(request.execution_id)

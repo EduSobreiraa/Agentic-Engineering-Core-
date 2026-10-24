@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import sqlite3
+import subprocess
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Literal
+from urllib.parse import quote
 
 from aec.persistence.database import Database
 from aec.workflows.loader import definition_hash, validate
@@ -15,6 +19,7 @@ from .contracts import (
     BenchmarkCase,
     BenchmarkPair,
     BenchmarkRun,
+    ChangeCategory,
     EvaluationVerdict,
     MethodologyApproval,
     MethodologyEvaluation,
@@ -22,6 +27,9 @@ from .contracts import (
     MethodologyPublication,
     MethodologyVersion,
     ProposalStatus,
+    RevisionVerification,
+    SemanticChange,
+    methodology_digest,
 )
 
 if TYPE_CHECKING:
@@ -34,6 +42,9 @@ def now() -> datetime:
 
 def digest(value: str) -> str:
     return hashlib.sha256(value.encode()).hexdigest()
+
+
+BLOCKED_METHODOLOGY_VERSIONS = frozenset({("security-audit", "1.0.2")})
 
 
 def _event(
@@ -71,6 +82,8 @@ class MethodologyRegistry:
 
     def seed(self, version: MethodologyVersion, *, actor: str) -> None:
         """Install an initial trusted version; never replace an existing version."""
+        if (version.methodology_id, version.version) in BLOCKED_METHODOLOGY_VERSIONS:
+            raise PermissionError("methodology version is blocked")
         self._validate_dependencies(version)
         content = version.model_dump_json()
         with self.db.connect() as db:
@@ -131,6 +144,8 @@ class MethodologyRegistry:
         return self.get(methodology_id, row["version"])
 
     def bind_run(self, run_id: str, methodology_id: str, version: str) -> None:
+        if (methodology_id, version) in BLOCKED_METHODOLOGY_VERSIONS:
+            raise PermissionError("methodology version is blocked")
         published = self.get(methodology_id, version)
         with self.db.connect() as db:
             db.execute("BEGIN IMMEDIATE")
@@ -163,6 +178,32 @@ class ProposalStore:
     def __init__(self, db: Database) -> None:
         self.db = db
 
+    def register_external_evidence(
+        self,
+        evidence_id: str,
+        source_database: Path,
+        source_run_id: str,
+        workspace: Path,
+        candidate_version: MethodologyVersion,
+    ) -> str:
+        """Register a checked source run by reference, without copying its rows."""
+        source = source_database.resolve(strict=True)
+        project = workspace.resolve(strict=True)
+        candidate_sha = methodology_digest(candidate_version)
+        evidence_sha = _source_evidence_digest(
+            source, source_run_id, project, candidate_version
+        )
+        with self.db.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            db.execute(
+                "INSERT INTO revision_external_evidence VALUES (?,?,?,?,?,?,?)",
+                (
+                    evidence_id, str(source), source_run_id, str(project),
+                    candidate_sha, evidence_sha, now().isoformat(),
+                ),
+            )
+        return evidence_sha
+
     def submit(self, proposal: MethodologyProposal) -> None:
         self.draft(proposal)
         self.submit_draft(proposal.proposal_id)
@@ -172,12 +213,17 @@ class ProposalStore:
         with self.db.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             for reference in proposal.evidence_refs:
-                if (
-                    db.execute(
-                        "SELECT 1 FROM engineering_runs WHERE run_id=?", (reference,)
-                    ).fetchone()
-                    is None
-                ):
+                engineering = db.execute(
+                    "SELECT 1 FROM engineering_runs WHERE run_id=?", (reference,)
+                ).fetchone()
+                workflow = db.execute(
+                    "SELECT 1 FROM workflow_runs WHERE run_id=?", (reference,)
+                ).fetchone()
+                external = db.execute(
+                    "SELECT 1 FROM revision_external_evidence WHERE evidence_id=?",
+                    (reference,),
+                ).fetchone()
+                if engineering is None and workflow is None and external is None:
                     raise ValueError(f"unknown evidence: {reference}")
             if (
                 db.execute(
@@ -253,6 +299,19 @@ def candidate(
         proposal.base_version,
     ):
         raise ValueError("proposal base does not match")
+    if (base.methodology_id, base.version) in BLOCKED_METHODOLOGY_VERSIONS:
+        raise PermissionError("blocked version cannot be a revision base")
+    if proposal.kind == "METHODOLOGY_REVISION":
+        revision = proposal.revision
+        assert revision is not None
+        if not base.mandatory_gates <= revision.mandatory_gates:
+            raise ValueError("revision removes a mandatory gate")
+        if not base.required_documents <= revision.required_documents:
+            raise ValueError("revision removes a required document")
+        if not any(step.type == "human_approval" for step in revision.definition.steps):
+            raise ValueError("revision removes human approval")
+        validate(revision.definition)
+        return revision
     steps = list(base.definition.steps)
     for change in proposal.changes:
         if change.gate in base.mandatory_gates or any(
@@ -295,6 +354,284 @@ def candidate(
         mandatory_gates=base.mandatory_gates,
         required_documents=base.required_documents,
     )
+
+
+def semantic_diff(
+    base: MethodologyVersion, revised: MethodologyVersion
+) -> tuple[SemanticChange, ...]:
+    def properties(
+        version: MethodologyVersion,
+    ) -> dict[tuple[ChangeCategory, str], str]:
+        values: dict[tuple[ChangeCategory, str], str] = {}
+
+        def put(category: ChangeCategory, subject: str, value: object) -> None:
+            values[(category, subject)] = json.dumps(
+                value, sort_keys=True, separators=(",", ":")
+            )
+
+        put("gate", "mandatory", sorted(version.mandatory_gates))
+        put("gate", "documents", sorted(version.required_documents))
+        put("limit", "workflow", version.definition.limits.model_dump(mode="json"))
+        put("state", "metadata", version.definition.metadata)
+        for step in version.definition.steps:
+            put("state", step.id, step.type)
+            put("agent", step.id, {
+                "agent": step.agent, "executor": step.executor,
+                "inputs": step.inputs, "outputs": step.outputs,
+            })
+            put("gate", step.id, step.validator)
+            put("permission", step.id, step.sandbox_mode)
+            put("transition", step.id, {
+                "depends_on": step.depends_on,
+                "condition": step.condition.model_dump(mode="json")
+                if step.condition else None,
+            })
+            put("limit", step.id, {
+                "timeout_seconds": step.timeout_seconds,
+                "retry_policy": step.retry_policy.model_dump(mode="json"),
+            })
+        return values
+
+    before, after = properties(base), properties(revised)
+    return tuple(
+        SemanticChange(
+            category=category, subject=subject,
+            before=before.get((category, subject)),
+            after=after.get((category, subject)),
+        )
+        for category, subject in sorted(before.keys() | after.keys())
+        if before.get((category, subject)) != after.get((category, subject))
+    )
+
+
+def revision_evidence_digest(
+    db: sqlite3.Connection,
+    run_ids: tuple[str, ...],
+    candidate_version: MethodologyVersion | None = None,
+) -> str:
+    evidence = []
+    for run_id in sorted(run_ids):
+        run = db.execute(
+            "SELECT definition,definition_hash,status FROM workflow_runs "
+            "WHERE run_id=?", (run_id,),
+        ).fetchone()
+        if run is None:
+            external = db.execute(
+                "SELECT * FROM revision_external_evidence WHERE evidence_id=?",
+                (run_id,),
+            ).fetchone()
+            if external is None or candidate_version is None:
+                raise ValueError("revision evidence run is missing")
+            if external["candidate_sha256"] != methodology_digest(candidate_version):
+                raise ValueError("external evidence names another candidate")
+            current = _source_evidence_digest(
+                Path(external["source_database"]),
+                str(external["source_run_id"]),
+                Path(external["workspace_path"]),
+                candidate_version,
+            )
+            if current != external["evidence_sha256"]:
+                raise ValueError("external revision evidence changed")
+            evidence.append({
+                "evidence_id": run_id,
+                "source_database": external["source_database"],
+                "source_run_id": external["source_run_id"],
+                "workspace_path": external["workspace_path"],
+                "candidate_sha256": external["candidate_sha256"],
+                "evidence_sha256": current,
+            })
+            continue
+        definition = WorkflowDefinition.model_validate_json(run["definition"])
+        if definition_hash(definition) != run["definition_hash"]:
+            raise ValueError("revision evidence definition changed")
+        steps = db.execute(
+            "SELECT step_id,status,execution_id,result FROM workflow_steps "
+            "WHERE run_id=? ORDER BY step_id", (run_id,),
+        ).fetchall()
+        executions = []
+        for step in steps:
+            if step["execution_id"] is None:
+                continue
+            execution = db.execute(
+                "SELECT status,result FROM executions WHERE execution_id=?",
+                (step["execution_id"],),
+            ).fetchone()
+            if execution is None:
+                raise ValueError("revision evidence execution is missing")
+            executions.append(dict(execution))
+        snapshot = db.execute(
+            "SELECT manifest,sha256,content FROM audit_artifact_snapshots "
+            "WHERE run_id=?", (run_id,),
+        ).fetchone()
+        record = {
+            "run_id": run_id,
+            "definition_hash": run["definition_hash"],
+            "status": run["status"],
+            "steps": [dict(step) for step in steps],
+            "executions": executions,
+            "messages": [dict(row) for row in db.execute(
+                "SELECT message_id,type,content FROM messages WHERE run_id=? "
+                "ORDER BY message_id", (run_id,),
+            ).fetchall()],
+            "documents": [dict(row) for row in db.execute(
+                "SELECT document_type,sha256,content FROM documentation_records "
+                "WHERE run_id=? ORDER BY document_id", (run_id,),
+            ).fetchall()],
+            "snapshot": {
+                "manifest": snapshot["manifest"],
+                "sha256": snapshot["sha256"],
+                "content_sha256": hashlib.sha256(snapshot["content"]).hexdigest(),
+            } if snapshot else None,
+        }
+        attachments = {}
+        for table in (
+            "arena_comparisons",
+            "tdd_red_snapshots",
+            "tdd_review_snapshots",
+            "workflow_adr_records",
+        ):
+            rows = db.execute(
+                f"SELECT content,sha256 FROM {table} WHERE run_id=? ORDER BY sha256",
+                (run_id,),
+            ).fetchall()
+            if rows:
+                if any(digest(row["content"]) != row["sha256"] for row in rows):
+                    raise ValueError(f"{table} evidence hash mismatch")
+                attachments[table] = [dict(row) for row in rows]
+        if attachments:
+            task_input = db.execute(
+                "SELECT content,sha256 FROM workflow_run_inputs WHERE run_id=?",
+                (run_id,),
+            ).fetchone()
+            if task_input is not None:
+                if digest(task_input["content"]) != task_input["sha256"]:
+                    raise ValueError("workflow task input evidence hash mismatch")
+                attachments["workflow_run_inputs"] = [dict(task_input)]
+            record["attachments"] = attachments
+        evidence.append(record)
+    return digest(json.dumps(evidence, sort_keys=True, separators=(",", ":")))
+
+
+def _source_evidence_digest(
+    source_database: Path,
+    run_id: str,
+    workspace: Path,
+    candidate_version: MethodologyVersion,
+) -> str:
+    source = source_database.resolve(strict=True)
+    project = workspace.resolve(strict=True)
+    with sqlite3.connect(
+        f"file:{quote(str(source))}?mode=ro", uri=True
+    ) as db:
+        db.row_factory = sqlite3.Row
+        db.execute("BEGIN")
+        run = db.execute(
+            "SELECT definition,definition_hash,status FROM workflow_runs "
+            "WHERE run_id=?",
+            (run_id,),
+        ).fetchone()
+        if run is None or run["status"] not in {"WAITING_APPROVAL", "COMPLETED"}:
+            raise ValueError("source run is missing or not reviewable")
+        definition = WorkflowDefinition.model_validate_json(run["definition"])
+        expected = definition_hash(candidate_version.definition)
+        if (
+            definition_hash(definition) != expected
+            or run["definition_hash"] != expected
+        ):
+            raise ValueError("source run differs from candidate")
+        binding = db.execute(
+            "SELECT methodology_id,version,sha256 FROM methodology_run_bindings "
+            "WHERE run_id=?", (run_id,),
+        ).fetchone()
+        published = db.execute(
+            "SELECT definition,sha256 FROM methodology_versions "
+            "WHERE methodology_id=? AND version=?",
+            (candidate_version.methodology_id, candidate_version.version),
+        ).fetchone()
+        if (
+            binding is None or published is None
+            or (binding["methodology_id"], binding["version"])
+            != (candidate_version.methodology_id, candidate_version.version)
+            or digest(published["definition"]) != published["sha256"]
+            or binding["sha256"] != published["sha256"]
+            or methodology_digest(
+                MethodologyVersion.model_validate_json(published["definition"])
+            ) != methodology_digest(candidate_version)
+        ):
+            raise ValueError("source methodology binding differs from candidate")
+        steps = {
+            row["step_id"]: row["status"] for row in db.execute(
+                "SELECT step_id,status FROM workflow_steps WHERE run_id=?", (run_id,)
+            ).fetchall()
+        }
+        if any(
+            steps.get(step.id) != "SUCCEEDED"
+            for step in candidate_version.definition.steps
+            if step.type == "validation"
+            and step.validator in candidate_version.mandatory_gates
+        ):
+            raise ValueError("source run lacks mandatory gates")
+        if (
+            candidate_version.definition.metadata.get("approval_binding")
+            == "audit_artifact"
+        ):
+            snapshot = db.execute(
+                "SELECT manifest,sha256,content FROM audit_artifact_snapshots "
+                "WHERE run_id=?", (run_id,),
+            ).fetchone()
+            if snapshot is None or digest(snapshot["manifest"]) != snapshot["sha256"]:
+                raise ValueError("source audit snapshot is missing or corrupt")
+            manifest = json.loads(snapshot["manifest"])
+            content = bytes(snapshot["content"])
+            required = {
+                "run_id", "methodology_id", "version", "methodology_sha256",
+                "definition_hash", "base_commit", "commit", "path",
+                "content_sha256",
+            }
+            if not isinstance(manifest, dict) or set(manifest) != required:
+                raise ValueError("source audit manifest is invalid")
+            if (
+                manifest["run_id"] != run_id
+                or manifest["methodology_id"] != candidate_version.methodology_id
+                or manifest["version"] != candidate_version.version
+                or manifest["methodology_sha256"] != published["sha256"]
+                or manifest["definition_hash"] != expected
+                or hashlib.sha256(content).hexdigest()
+                != manifest["content_sha256"]
+            ):
+                raise ValueError("source audit snapshot does not match candidate")
+            relative = Path(manifest["path"])
+            if relative.is_absolute() or ".." in relative.parts:
+                raise ValueError("source audit path escapes the workspace")
+            try:
+                blob = subprocess.run(
+                    ["git", "-C", str(project), "cat-file", "blob",
+                     f"{manifest['commit']}:{manifest['path']}"],
+                    check=True, capture_output=True, timeout=30,
+                ).stdout
+                head = subprocess.run(
+                    ["git", "-C", str(project), "rev-parse", "HEAD"],
+                    check=True, capture_output=True, timeout=30, text=True,
+                ).stdout.strip()
+                dirty = subprocess.run(
+                    ["git", "-C", str(project), "status", "--porcelain"],
+                    check=True, capture_output=True, timeout=30, text=True,
+                ).stdout
+            except subprocess.SubprocessError as exc:
+                raise ValueError("source audit commit is unavailable") from exc
+            raw_target = project / relative
+            if raw_target.is_symlink():
+                raise ValueError("source audit target is a symlink")
+            target = raw_target.resolve(strict=True)
+            if (
+                project not in target.parents
+                or blob != content
+                or target.read_bytes() != content
+                or head != manifest["commit"]
+                or dirty
+            ):
+                raise ValueError("source audit artifact differs from snapshot")
+        return revision_evidence_digest(db, (run_id,))
 
 
 class MethodologyEvaluator:
@@ -406,9 +743,115 @@ class MethodologyEvaluator:
         )
         return self._finish(result)
 
+    def evaluate_revision(
+        self,
+        proposal_id: str,
+        verifier: Callable[[MethodologyVersion], RevisionVerification],
+    ) -> MethodologyEvaluation:
+        if self.store.get(proposal_id)[0].kind != "METHODOLOGY_REVISION":
+            raise ValueError("proposal is not a full methodology revision")
+        proposal, sha = self._begin(proposal_id)
+        candidate_sha: str | None = None
+        evidence_sha: str | None = None
+        differences: tuple[SemanticChange, ...] = ()
+        verification: RevisionVerification | None = None
+        limitations: tuple[str, ...] = ()
+        try:
+            base = self.registry.get(proposal.methodology_id, proposal.base_version)
+            revised = candidate(base, proposal)
+            self.registry._validate_dependencies(revised)
+            if proposal.proposed_version in self.registry.versions(
+                proposal.methodology_id
+            ):
+                raise ValueError("proposed version is already published")
+            candidate_sha = methodology_digest(revised)
+            differences = semantic_diff(base, revised)
+            if not differences:
+                raise ValueError("revision has no semantic changes")
+            verifier_input = revised.model_copy(deep=True)
+            verification = verifier(verifier_input)
+            if methodology_digest(verifier_input) != candidate_sha:
+                raise ValueError("verifier mutated the candidate")
+            if verification.candidate_sha256 != candidate_sha:
+                raise ValueError("verification names another candidate")
+            if set(verification.evidence_refs) != set(proposal.evidence_refs):
+                raise ValueError("verification does not cover proposal evidence")
+            with self.store.db.connect() as db:
+                for run_id in proposal.evidence_refs:
+                    run = db.execute(
+                        "SELECT definition_hash,status FROM workflow_runs "
+                        "WHERE run_id=?", (run_id,),
+                    ).fetchone()
+                    if run is None:
+                        external = db.execute(
+                            "SELECT 1 FROM revision_external_evidence "
+                            "WHERE evidence_id=?", (run_id,),
+                        ).fetchone()
+                        if external is not None:
+                            continue
+                    if (
+                        run is None
+                        or run["definition_hash"] != definition_hash(revised.definition)
+                        or run["status"] not in {"WAITING_APPROVAL", "COMPLETED"}
+                    ):
+                        raise ValueError("evidence run does not match candidate")
+                    gate_rows = db.execute(
+                        "SELECT step_id,status FROM workflow_steps WHERE run_id=?",
+                        (run_id,),
+                    ).fetchall()
+                    gates = {row["step_id"]: row["status"] for row in gate_rows}
+                    if any(
+                        gates.get(step.id) != "SUCCEEDED"
+                        for step in revised.definition.steps
+                        if step.type == "validation"
+                        and step.validator in revised.mandatory_gates
+                    ):
+                        raise ValueError("evidence run lacks mandatory gates")
+                evidence_sha = revision_evidence_digest(
+                    db, proposal.evidence_refs, revised
+                )
+            if len({check.name for check in verification.checks}) != len(
+                verification.checks
+            ):
+                raise ValueError("duplicate revision check")
+            limitations = verification.limitations
+            verdict = (
+                EvaluationVerdict.PASS_WITH_WARNINGS
+                if all(check.passed for check in verification.checks)
+                and limitations
+                else EvaluationVerdict.PASS
+                if all(check.passed for check in verification.checks)
+                else EvaluationVerdict.FAIL
+            )
+            checks = tuple(
+                f"{check.name}: {'PASS' if check.passed else 'FAIL'} "
+                f"({check.evidence})"
+                for check in verification.checks
+            )
+        except Exception as exc:
+            verdict = EvaluationVerdict.FAIL
+            checks = (f"{type(exc).__name__}: {exc}",)
+        return self._finish(
+            MethodologyEvaluation(
+                evaluation_id=f"eval:{proposal_id}",
+                proposal_id=proposal_id,
+                proposal_sha256=sha,
+                candidate_sha256=candidate_sha,
+                evidence_sha256=evidence_sha,
+                semantic_diff=differences,
+                revision_checks=verification.checks if verification else (),
+                verdict=verdict,
+                checks=checks,
+                limitations=limitations,
+                evidence_kind="EXECUTED" if verification else "FIXTURE",
+            )
+        )
+
     async def evaluate_controlled(
         self, proposal_id: str, runner: LocalBenchmarkRunner
     ) -> MethodologyEvaluation:
+        if self.store.get(proposal_id)[0].kind == "METHODOLOGY_REVISION":
+            raise ValueError("full revision requires revision-specific verification")
         proposal, sha = self._begin(proposal_id)
         runs: tuple[BenchmarkRun, ...] = ()
         pairs: tuple[BenchmarkPair, ...] = ()
@@ -559,6 +1002,8 @@ class MethodologyGovernance:
         proposal_id: str,
         actor: str,
         decision: Literal["APPROVED", "REJECTED", "CHANGES_REQUESTED"],
+        *,
+        candidate_sha256: str | None = None,
     ) -> MethodologyApproval:
         if actor not in self.local_approvers:
             raise PermissionError("local approver is not authorized")
@@ -575,6 +1020,21 @@ class MethodologyGovernance:
                 (proposal_id,),
             ).fetchone()["evaluation"]
             assessment = MethodologyEvaluation.model_validate_json(evaluation)
+            if proposal.kind == "METHODOLOGY_REVISION":
+                if (
+                    candidate_sha256 != proposal.candidate_sha256
+                    or assessment.candidate_sha256 != candidate_sha256
+                    or assessment.proposal_sha256 != sha
+                ):
+                    raise ValueError("approval does not match evaluated candidate")
+                if decision == "APPROVED" and assessment.evidence_sha256 != (
+                    revision_evidence_digest(
+                        db, proposal.evidence_refs, proposal.revision
+                    )
+                ):
+                    raise ValueError("revision evidence changed after evaluation")
+            elif candidate_sha256 is not None:
+                raise ValueError("legacy proposal has no candidate digest")
             if decision == "APPROVED" and (
                 assessment.evidence_kind != "EXECUTED"
                 or assessment.verdict
@@ -582,12 +1042,14 @@ class MethodologyGovernance:
             ):
                 raise ValueError("executed evaluation required for approval")
             result = db.execute(
-                "UPDATE methodology_proposals SET status=?,approval_by=?,approval_at=? "
+                "UPDATE methodology_proposals SET status=?,approval_by=?,approval_at=?,"
+                "approval_candidate_sha256=? "
                 "WHERE proposal_id=? AND status=? AND sha256=?",
                 (
                     decision,
                     actor,
                     decided_at.isoformat(),
+                    candidate_sha256,
                     proposal_id,
                     ProposalStatus.AWAITING_APPROVAL,
                     sha,
@@ -599,6 +1061,7 @@ class MethodologyGovernance:
         return MethodologyApproval(
             proposal_id=proposal.proposal_id,
             proposal_sha256=sha,
+            candidate_sha256=candidate_sha256,
             actor=actor,
             decided_at=decided_at,
             decision=decision,
@@ -608,10 +1071,15 @@ class MethodologyGovernance:
         if actor not in self.local_approvers:
             raise PermissionError("local publisher is not authorized")
         proposal, _, sha = self.store.get(proposal_id)
+        if (
+            proposal.methodology_id, proposal.proposed_version
+        ) in BLOCKED_METHODOLOGY_VERSIONS:
+            raise PermissionError("methodology version is blocked")
         with self.store.db.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             row = db.execute(
-                "SELECT status,sha256,approval_by,approval_at,evaluation "
+                "SELECT status,sha256,approval_by,approval_at,evaluation,"
+                "approval_candidate_sha256 "
                 "FROM methodology_proposals WHERE proposal_id=?",
                 (proposal_id,),
             ).fetchone()
@@ -655,6 +1123,19 @@ class MethodologyGovernance:
             base = self.registry.get(proposal.methodology_id, proposal.base_version)
             version = candidate(base, proposal)
             self.registry._validate_dependencies(version)
+            if proposal.kind == "METHODOLOGY_REVISION":
+                current_sha = methodology_digest(version)
+                if (
+                    row["approval_candidate_sha256"] != current_sha
+                    or evaluation.candidate_sha256 != current_sha
+                    or evaluation.semantic_diff != semantic_diff(base, version)
+                    or not evaluation.revision_checks
+                    or not all(check.passed for check in evaluation.revision_checks)
+                    or evaluation.evidence_sha256 != revision_evidence_digest(
+                        db, proposal.evidence_refs, version
+                    )
+                ):
+                    raise PermissionError("approved candidate changed")
             content = version.model_dump_json()
             published_at = now()
             db.execute(

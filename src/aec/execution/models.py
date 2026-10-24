@@ -1,11 +1,12 @@
 """Public execution contracts."""
 
+from collections.abc import Callable
 from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator
 
 from aec.communication.schemas import ArtifactRef
 
@@ -23,6 +24,8 @@ class ExecutionStatus(StrEnum):
 
 class ExecutionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
+    _process_observer: Callable[[str, int], None] | None = PrivateAttr(default=None)
+    _scope_observer: Callable[[str, str], None] | None = PrivateAttr(default=None)
 
     execution_id: Annotated[str, Field(min_length=1)]
     run_id: Annotated[str, Field(pattern=r"^[A-Za-z0-9._-]+$")]

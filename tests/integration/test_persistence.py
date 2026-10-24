@@ -21,7 +21,9 @@ def test_phase_five_database_upgrades_without_losing_document_tables(
             connection.execute(f"PRAGMA user_version = {index}")
     db = Database(path)
     with db.connect() as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 7
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == len(
+            MIGRATIONS
+        )
         names = {
             row[0]
             for row in connection.execute(
