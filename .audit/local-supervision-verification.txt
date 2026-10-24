@@ -1,0 +1,56 @@
+Local operator identity and process supervision — 2026-10-23
+
+Host probe:
+  cgroup v2 present; systemd-run and systemctl installed; systemctl --user
+  is-system-running returned running.
+  systemd-run --user --scope preserved stdin/stdout with an inert cat command.
+  --pipe is incompatible with --scope on this host; --quiet suppressed the
+  wrapper line so Codex JSONL remained parseable.
+
+Process supervision:
+  tests/integration/test_execution.py::test_systemd_scope_tracks_child_outside_process_group
+    PASS — detached child outside PGID kept scope active, status INTERRUPTED,
+    and reconciliation was rejected.
+  tests/integration/test_execution.py::test_systemd_scope_survives_manager_sigkill
+    PASS — manager SIGKILL left scope active; restart preserved INTERRUPTED,
+    workspace quarantine and rejection of reconciliation.
+  tests/integration/test_execution.py::test_systemd_scope_preserves_codex_jsonl
+    PASS — two fake Codex turns completed, JSONL parsed and scopes persisted.
+  tests/integration/test_execution.py::test_cancel_with_unstopped_scope_remains_interrupted
+    PASS — failed unit stop with a detached child kept status INTERRUPTED and
+    the workspace quarantined.
+  tests/integration/test_execution.py::test_scope_inspection_failure_blocks_reconciliation
+    PASS — unavailable user manager prevented reconciliation and release.
+  AEC_RUN_REAL_CODEX=1 uv run pytest -q
+    tests/scenarios/test_real_codex_opt_in.py::test_real_codex_in_systemd_scope
+    --basetemp .audit/scope-real-final
+    PASS — one real Codex read-only turn in a disposable project, 5.56 s;
+    repeated after unique scope names in 5.62 s. Result SUCCEEDED, scope
+    empty, workspace unchanged.
+
+Local identity:
+  tests/unit/test_local_gateway.py
+    PASS — kernel SO_PEERCRED UID mapped to actor and allowed actions;
+    unknown UID, disallowed action and client-supplied actor rejected.
+  Gateway remains a library object, not an installed daemon. The current
+  host does not separate the operator UID from the Codex agent UID; an agent
+  under that UID could reach an operator-accessible socket. An effective
+  deployment needs separate service/operator/agent permissions, protected
+  SQLite and a socket inaccessible to agent processes.
+
+Existing operational database:
+  .audit/aec-pub-004/operational.sqlite migrated to schema version 18.
+  execution_scopes table present; implementation-arena@1.0.1,
+  tdd-adversarial@1.0.1, security-audit@1.0.3 and
+  decision-adversarial@1.0.1 remained active.
+
+Final required gates:
+  uv run ruff check .  -> All checks passed!
+  uv run mypy          -> Success: no issues found in 83 source files
+  uv run pytest -q     -> 208 passed, 12 skipped in 25.07s
+  git diff --check     -> PASS
+
+Limits: systemd scope mode is opt-in; portable PGID mode remains default.
+No real Codex SIGKILL was repeated under scope. The SIGKILL and detached-child
+tests used a simulated Codex CLI. No OS sandbox, remote authentication, or
+automatic process termination on restart was added. Phase 8 was not started.

@@ -113,6 +113,10 @@ class DocumentationRequest(Contract):
         "execution-report",
         "qa-summary",
         "change-summary",
+        "arena-report",
+        "tdd-report",
+        "security-audit-report",
+        "decision-report",
         "adr",
         "technical-documentation",
     ]

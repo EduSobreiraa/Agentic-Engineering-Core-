@@ -1,0 +1,47 @@
+AEC Phase 7 local supervised publication — 2026-10-23
+
+Authorization: user explicitly approved publication after Arena tests. Operational
+approvals used the authorized local actor; they apply to methodology revisions,
+not to workflow runs or their code artifacts.
+
+Real Codex Arena 1.0.1:
+  AEC_RUN_REAL_CODEX=1 uv run pytest -q tests/scenarios/test_real_codex_opt_in.py -k measured --basetemp .audit/arena-v101-real
+  2 passed, 6 deselected in 69.10s.
+  Both candidates valid: five samples each, overlapping elapsed time/RSS,
+  parent FAILED for tie, no QA, no approval.
+  Controlled gate failure: one valid candidate, QA COMPLETED,
+  parent WAITING_APPROVAL. This does not prove natural performance superiority.
+
+Real Codex TDD and decision refresh:
+  AEC_RUN_REAL_CODEX=1 uv run pytest -q tests/scenarios/test_phase7_workflows.py::test_real_tdd_cycle_in_trusted_fixture tests/scenarios/test_phase7_workflows.py::test_real_decision_proposal_contest_adr --basetemp .audit/phase7-publication-real
+  2 passed in 239.06s. Both runs remained WAITING_APPROVAL.
+
+Operational SQLite: .audit/aec-pub-004/operational.sqlite
+  AEC-PUB-004-SECURITY-AUDIT-103  PUBLISHED  security-audit@1.0.3
+    candidate digest b5eb70c34789c7a6fb7cc432420601076d5a4447bde13bb1d4af15e79dc68cc8
+  AEC-PUB-005-TDD-101            PUBLISHED  tdd-adversarial@1.0.1
+    candidate digest 14079b500bd3c9f1191c265db03f617f2d49b8ce8325be1ce5e79221967eb7a3
+  AEC-PUB-005-DECISION-101       PUBLISHED  decision-adversarial@1.0.1
+    candidate digest 5999322011acb0bd888fa0b6cc1af4b25d69d6c6d77ccf1c198e98ad75e4429f
+  AEC-PUB-005-ARENA-101          PUBLISHED  implementation-arena@1.0.1
+    candidate digest d53e132abef83880c98fe5e761467085484d551153ef69a31d192601b17a9d3b
+  security-audit@1.0.2 remains blocked. No merge was performed.
+
+Operational Router smoke:
+  bug -> tdd-adversarial@1.0.1 READY
+  alternatives -> implementation-arena@1.0.1 READY (benchmark_argv declared)
+  architecture_decision -> decision-adversarial@1.0.1 READY
+  security_audit -> security-audit@1.0.3 READY (trusted project policy)
+
+Final standard gates:
+  uv run ruff check .  -> All checks passed!
+  uv run mypy          -> Success: no issues found in 81 source files
+  uv run pytest -q     -> 201 passed, 11 skipped in 19.74s
+
+Limits: Evidence references local SQLite and Git workspaces; it is not a
+self-contained archive. The Codex workload used trusted disposable projects.
+There is no OS sandbox, remote human authentication, untrusted-code support,
+or validated supervision of descendants outside the process group. The Arena
+benchmark read a tiny solution.txt file and mainly exercises measurement and
+selection integrity, not comparative algorithmic complexity. Phase 8 was not
+started.

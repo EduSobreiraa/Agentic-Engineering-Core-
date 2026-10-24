@@ -8,6 +8,8 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from aec.communication.schemas import ArtifactRef
+
 
 class WorkflowStatus(StrEnum):
     CREATED = "CREATED"
@@ -75,6 +77,15 @@ class WorkflowDefinition(BaseModel):
     steps: list[WorkflowStep]
     limits: WorkflowLimits = Field(default_factory=WorkflowLimits)
     metadata: dict[str, str] = Field(default_factory=dict)
+
+
+class WorkflowTaskInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    requirements: Annotated[str, Field(min_length=1)]
+    acceptance_criteria: Annotated[
+        tuple[Annotated[str, Field(min_length=1)], ...], Field(min_length=1)
+    ]
+    artifact_refs: tuple[ArtifactRef, ...] = ()
 
 
 class WorkflowRun(BaseModel):

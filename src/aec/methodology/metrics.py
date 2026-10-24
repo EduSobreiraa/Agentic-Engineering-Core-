@@ -107,11 +107,15 @@ def calculate(
         ),
         metric(
             "workflow_completion_rate",
-            sum(o.status == "APPROVED" for o in runs),
+            sum(
+                o.status == "APPROVED"
+                or (o.status == "COMPLETED" and o.approval_at is not None)
+                for o in runs
+            ),
             len(runs),
             "fraction",
-            "engineering_runs",
-            "Approval is the terminal successful state.",
+            "engineering_runs or workflow_runs",
+            "Generic workflows count only after recorded human approval.",
         ),
         metric(
             "human_intervention_rate",

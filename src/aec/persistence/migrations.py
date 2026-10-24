@@ -210,6 +210,168 @@ MIGRATIONS = (
     BEFORE DELETE ON methodology_versions
     BEGIN SELECT RAISE(ABORT, 'published methodology is immutable'); END;
     """,
+    """
+    CREATE TABLE tdd_red_snapshots (
+        run_id TEXT PRIMARY KEY,
+        content TEXT NOT NULL,
+        sha256 TEXT NOT NULL
+    );
+    CREATE TRIGGER tdd_red_snapshots_no_update
+    BEFORE UPDATE ON tdd_red_snapshots
+    BEGIN SELECT RAISE(ABORT, 'Red snapshot is immutable'); END;
+    CREATE TRIGGER tdd_red_snapshots_no_delete
+    BEFORE DELETE ON tdd_red_snapshots
+    BEGIN SELECT RAISE(ABORT, 'Red snapshot is immutable'); END;
+    """,
+    """
+    CREATE TABLE arena_comparisons (
+        run_id TEXT PRIMARY KEY REFERENCES workflow_runs(run_id),
+        content TEXT NOT NULL,
+        sha256 TEXT NOT NULL
+    );
+    CREATE TRIGGER arena_comparisons_no_update
+    BEFORE UPDATE ON arena_comparisons
+    BEGIN SELECT RAISE(ABORT, 'arena comparison is immutable'); END;
+    CREATE TRIGGER arena_comparisons_no_delete
+    BEFORE DELETE ON arena_comparisons
+    BEGIN SELECT RAISE(ABORT, 'arena comparison is immutable'); END;
+    """,
+    """
+    CREATE TABLE workflow_adr_records (
+        adr_id TEXT NOT NULL,
+        revision INTEGER NOT NULL CHECK(revision >= 1),
+        run_id TEXT NOT NULL REFERENCES workflow_runs(run_id),
+        task_id TEXT NOT NULL,
+        status TEXT NOT NULL CHECK(status IN
+            ('PROPOSED','ACCEPTED','REJECTED','SUPERSEDED')),
+        content TEXT NOT NULL,
+        sha256 TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY(adr_id, revision),
+        UNIQUE(adr_id, run_id, sha256)
+    );
+    CREATE TRIGGER workflow_adr_records_no_update
+    BEFORE UPDATE ON workflow_adr_records
+    BEGIN SELECT RAISE(ABORT, 'historical ADR is immutable'); END;
+    CREATE TRIGGER workflow_adr_records_no_delete
+    BEFORE DELETE ON workflow_adr_records
+    BEGIN SELECT RAISE(ABORT, 'historical ADR is immutable'); END;
+    """,
+    """
+    CREATE TABLE workflow_run_inputs (
+        run_id TEXT PRIMARY KEY REFERENCES workflow_runs(run_id),
+        content TEXT NOT NULL,
+        sha256 TEXT NOT NULL
+    );
+    CREATE TRIGGER workflow_run_inputs_no_update
+    BEFORE UPDATE ON workflow_run_inputs
+    BEGIN SELECT RAISE(ABORT, 'workflow task input is immutable'); END;
+    CREATE TRIGGER workflow_run_inputs_no_delete
+    BEFORE DELETE ON workflow_run_inputs
+    BEGIN SELECT RAISE(ABORT, 'workflow task input is immutable'); END;
+    """,
+    """
+    CREATE TABLE tdd_review_snapshots (
+        run_id TEXT PRIMARY KEY,
+        content TEXT NOT NULL,
+        sha256 TEXT NOT NULL
+    );
+    CREATE TRIGGER tdd_review_snapshots_no_update
+    BEFORE UPDATE ON tdd_review_snapshots
+    BEGIN SELECT RAISE(ABORT, 'TDD review snapshot is immutable'); END;
+    CREATE TRIGGER tdd_review_snapshots_no_delete
+    BEFORE DELETE ON tdd_review_snapshots
+    BEGIN SELECT RAISE(ABORT, 'TDD review snapshot is immutable'); END;
+    """,
+    """
+    CREATE TABLE audit_artifact_snapshots (
+        run_id TEXT PRIMARY KEY REFERENCES workflow_runs(run_id),
+        manifest TEXT NOT NULL, sha256 TEXT NOT NULL,
+        content BLOB NOT NULL
+    );
+    CREATE TRIGGER audit_artifact_snapshots_no_update
+    BEFORE UPDATE ON audit_artifact_snapshots
+    BEGIN SELECT RAISE(ABORT, 'audit artifact snapshot is immutable'); END;
+    CREATE TRIGGER audit_artifact_snapshots_no_delete
+    BEFORE DELETE ON audit_artifact_snapshots
+    BEGIN SELECT RAISE(ABORT, 'audit artifact snapshot is immutable'); END;
+    CREATE TABLE workflow_approval_bindings (
+        run_id TEXT NOT NULL, step_id TEXT NOT NULL,
+        manifest_sha256 TEXT NOT NULL, definition_hash TEXT NOT NULL,
+        methodology_id TEXT NOT NULL, version TEXT NOT NULL,
+        methodology_sha256 TEXT NOT NULL,
+        PRIMARY KEY(run_id, step_id),
+        FOREIGN KEY(run_id, step_id)
+            REFERENCES workflow_approvals(run_id, step_id)
+    );
+    CREATE TRIGGER workflow_approval_bindings_no_update
+    BEFORE UPDATE ON workflow_approval_bindings
+    BEGIN SELECT RAISE(ABORT, 'workflow approval binding is immutable'); END;
+    CREATE TRIGGER workflow_approval_bindings_no_delete
+    BEFORE DELETE ON workflow_approval_bindings
+    BEGIN SELECT RAISE(ABORT, 'workflow approval binding is immutable'); END;
+    """,
+    """
+    CREATE TABLE execution_reconciliations (
+        execution_id TEXT PRIMARY KEY REFERENCES executions(execution_id),
+        actor TEXT NOT NULL, evidence TEXT NOT NULL, reconciled_at TEXT NOT NULL
+    );
+    CREATE TRIGGER execution_reconciliations_no_update
+    BEFORE UPDATE ON execution_reconciliations
+    BEGIN SELECT RAISE(ABORT, 'execution reconciliation is immutable'); END;
+    CREATE TRIGGER execution_reconciliations_no_delete
+    BEFORE DELETE ON execution_reconciliations
+    BEGIN SELECT RAISE(ABORT, 'execution reconciliation is immutable'); END;
+    CREATE TABLE execution_processes (
+        execution_id TEXT PRIMARY KEY REFERENCES executions(execution_id),
+        pid INTEGER NOT NULL, pgid INTEGER NOT NULL,
+        boot_id TEXT, start_ticks INTEGER, recorded_at TEXT NOT NULL
+    );
+    CREATE TRIGGER execution_processes_no_update
+    BEFORE UPDATE ON execution_processes
+    BEGIN SELECT RAISE(ABORT, 'execution process identity is immutable'); END;
+    CREATE TRIGGER execution_processes_no_delete
+    BEFORE DELETE ON execution_processes
+    BEGIN SELECT RAISE(ABORT, 'execution process identity is immutable'); END;
+    """,
+    """
+    ALTER TABLE execution_reconciliations ADD COLUMN effects_status TEXT NOT NULL
+        DEFAULT 'UNKNOWN' CHECK(effects_status IN ('VERIFIED','REVERTED','UNKNOWN'));
+    """,
+    """
+    ALTER TABLE methodology_proposals ADD COLUMN approval_candidate_sha256 TEXT;
+    """,
+    """
+    CREATE TABLE revision_external_evidence (
+        evidence_id TEXT PRIMARY KEY,
+        source_database TEXT NOT NULL,
+        source_run_id TEXT NOT NULL,
+        workspace_path TEXT NOT NULL,
+        candidate_sha256 TEXT NOT NULL,
+        evidence_sha256 TEXT NOT NULL,
+        registered_at TEXT NOT NULL
+    );
+    CREATE TRIGGER revision_external_evidence_no_update
+    BEFORE UPDATE ON revision_external_evidence
+    BEGIN SELECT RAISE(ABORT, 'revision evidence is immutable'); END;
+    CREATE TRIGGER revision_external_evidence_no_delete
+    BEFORE DELETE ON revision_external_evidence
+    BEGIN SELECT RAISE(ABORT, 'revision evidence is immutable'); END;
+    """,
+    """
+    CREATE TABLE execution_scopes (
+        execution_id TEXT PRIMARY KEY REFERENCES executions(execution_id),
+        unit_name TEXT NOT NULL UNIQUE,
+        boot_id TEXT NOT NULL,
+        recorded_at TEXT NOT NULL
+    );
+    CREATE TRIGGER execution_scopes_no_update
+    BEFORE UPDATE ON execution_scopes
+    BEGIN SELECT RAISE(ABORT, 'execution scope is immutable'); END;
+    CREATE TRIGGER execution_scopes_no_delete
+    BEFORE DELETE ON execution_scopes
+    BEGIN SELECT RAISE(ABORT, 'execution scope is immutable'); END;
+    """,
 )
 
 

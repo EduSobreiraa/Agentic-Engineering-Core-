@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -34,6 +35,7 @@ from .models import (
     WorkflowRun,
     WorkflowStatus,
     WorkflowStep,
+    WorkflowTaskInput,
 )
 from .repository import WorkflowRepository
 
@@ -57,6 +59,7 @@ class WorkflowEngine:
         *,
         workspaces: dict[str, Path] | None = None,
         local_approvers: frozenset[str] = frozenset(),
+        approval_bindings: dict[str, Callable[[str], str]] | None = None,
     ) -> None:
         broker._identity(orchestrator)
         broker._identity(quality_gate)
@@ -76,6 +79,7 @@ class WorkflowEngine:
         }
         self.validators = validators
         self.local_approvers = local_approvers
+        self.approval_bindings = approval_bindings or {}
         self.repository = WorkflowRepository(broker.db)
         self._active: set[str] = set()
         self._tasks: dict[str, asyncio.Task[WorkflowRun]] = {}
@@ -90,8 +94,12 @@ class WorkflowEngine:
         definition: WorkflowDefinition,
         run_id: str | None,
         binding: tuple[str, str, str] | None,
+        task_input: WorkflowTaskInput | None = None,
     ) -> WorkflowRun:
         validate(definition)
+        binding_name = definition.metadata.get("approval_binding")
+        if binding_name and binding_name not in self.approval_bindings:
+            raise ValueError("approval binding is not registered")
         for step in definition.steps:
             if step.type == "agent" and (
                 step.agent not in self.agents
@@ -107,7 +115,9 @@ class WorkflowEngine:
                     raise ValueError("QA needs read-only mode and artifact_id")
             if step.type == "validation" and step.validator not in self.validators:
                 raise ValueError("validator is not registered")
-        run = self.repository.create(run_id or str(uuid4()), definition, binding)
+        run = self.repository.create(
+            run_id or str(uuid4()), definition, binding, task_input
+        )
         self.repository.workflow_status(run.run_id, WorkflowStatus.VALIDATED)
         return self.repository.get_run(run.run_id)
 
@@ -117,6 +127,8 @@ class WorkflowEngine:
         methodology_id: str,
         version: str,
         run_id: str | None = None,
+        *,
+        task_input: WorkflowTaskInput,
     ) -> WorkflowRun:
         if Path(registry.db.path).resolve() != Path(self.broker.db.path).resolve():
             raise ValueError("registry and workflow must share a database")
@@ -130,7 +142,10 @@ class WorkflowEngine:
         if row is None:
             raise KeyError((methodology_id, version))
         return self._create(
-            definition, run_id, (methodology_id, version, str(row["sha256"]))
+            definition,
+            run_id,
+            (methodology_id, version, str(row["sha256"])),
+            task_input,
         )
 
     def _ready(
@@ -183,10 +198,15 @@ class WorkflowEngine:
             assert isinstance(output, str)
             return output
 
-        return {
+        inputs = {
             key: re.sub(r"\{\{([A-Za-z0-9_-]+)\.output\}\}", replace, value)
             for key, value in step.inputs.items()
         }
+        task_input = self.repository.task_input(run_id)
+        if step.type == "agent" and task_input is not None:
+            context = json.dumps(task_input.model_dump(mode="json"), sort_keys=True)
+            inputs["prompt"] += "\n\nTask input (operator supplied): " + context
+        return inputs
 
     async def _execute(self, run_id: str, step: WorkflowStep) -> None:
         self.repository.step_status(run_id, step.id, StepStatus.READY)
@@ -376,6 +396,8 @@ class WorkflowEngine:
         status = (
             StepStatus.SUCCEEDED
             if result.status == ExecutionStatus.SUCCEEDED
+            else StepStatus.INTERRUPTED
+            if result.status == ExecutionStatus.INTERRUPTED
             else StepStatus.FAILED
         )
         self.repository.step_status(
@@ -500,9 +522,18 @@ class WorkflowEngine:
                     if required_approval_skipped:
                         self._fail(run_id, "required approval was skipped")
                     else:
-                        self.repository.workflow_status(
-                            run_id, WorkflowStatus.COMPLETED
-                        )
+                        try:
+                            self._verify_completion_binding(run_id, definition)
+                        except Exception as exc:
+                            self._fail(
+                                run_id,
+                                "approved artifact integrity invalid: "
+                                + type(exc).__name__,
+                            )
+                        else:
+                            self.repository.workflow_status(
+                                run_id, WorkflowStatus.COMPLETED
+                            )
                 else:
                     raise RuntimeError("workflow has no eligible step")
                 return self.repository.get_run(run_id)
@@ -511,18 +542,88 @@ class WorkflowEngine:
             self._tasks.pop(run_id, None)
 
     def decide(
-        self, run_id: str, step_id: str, actor: str, approved: bool
+        self,
+        run_id: str,
+        step_id: str,
+        actor: str,
+        approved: bool,
+        *,
+        manifest_sha256: str | None = None,
     ) -> WorkflowRun:
+        from aec.methodology.governance import BLOCKED_METHODOLOGY_VERSIONS
+
         if actor not in self.local_approvers:
             raise PermissionError("local approver is not authorized")
-        if self.recover(run_id).status != WorkflowStatus.WAITING_APPROVAL:
-            raise ValueError("workflow is not waiting for approval")
-        self.repository.decide(run_id, step_id, actor, approved)
-        if approved:
-            self.repository.workflow_status(run_id, WorkflowStatus.RUNNING)
-        else:
-            self._fail(run_id, "human approval rejected")
-        return self.repository.get_run(run_id)
+        lock = LocalLock(self.broker.db.path, f"workflow:{run_id}")
+        try:
+            if not lock.try_acquire():
+                raise RuntimeError("workflow is active in another engine")
+            if self._recover(run_id).status != WorkflowStatus.WAITING_APPROVAL:
+                raise ValueError("workflow is not waiting for approval")
+            with self.broker.db.connect() as db:
+                binding = db.execute(
+                    "SELECT methodology_id,version FROM methodology_run_bindings "
+                    "WHERE run_id=?", (run_id,)
+                ).fetchone()
+            if binding and (
+                binding["methodology_id"], binding["version"]
+            ) in BLOCKED_METHODOLOGY_VERSIONS:
+                raise PermissionError("methodology version is blocked")
+            definition = self.repository.definition(run_id)
+            name = definition.metadata.get("approval_binding")
+            if approved and name:
+                guard = self.approval_bindings.get(name)
+                if guard is None:
+                    raise ValueError("approval binding is not registered")
+                if manifest_sha256 != guard(run_id):
+                    raise PermissionError("approved manifest does not match artifact")
+            self.repository.decide(
+                run_id, step_id, actor, approved,
+                manifest_sha256=manifest_sha256 if approved else None,
+            )
+            if approved:
+                self.repository.workflow_status(run_id, WorkflowStatus.RUNNING)
+            else:
+                self._fail(run_id, "human approval rejected")
+            return self.repository.get_run(run_id)
+        finally:
+            lock.close()
+
+    def _verify_completion_binding(
+        self, run_id: str, definition: WorkflowDefinition
+    ) -> None:
+        from aec.methodology.governance import BLOCKED_METHODOLOGY_VERSIONS
+
+        with self.broker.db.connect() as db:
+            methodology = db.execute(
+                "SELECT methodology_id,version,sha256 FROM "
+                "methodology_run_bindings WHERE run_id=?",
+                (run_id,),
+            ).fetchone()
+        if methodology and (
+            methodology["methodology_id"], methodology["version"]
+        ) in BLOCKED_METHODOLOGY_VERSIONS:
+            raise PermissionError("methodology version is blocked")
+        name = definition.metadata.get("approval_binding")
+        if not name:
+            return
+        guard = self.approval_bindings.get(name)
+        if guard is None:
+            raise ValueError("approval binding is not registered")
+        digest = guard(run_id)
+        run = self.repository.get_run(run_id)
+        if methodology is None:
+            raise ValueError("published methodology binding is missing")
+        expected = (
+            digest, run.definition_hash, methodology["methodology_id"],
+            methodology["version"], methodology["sha256"],
+        )
+        approvals = [step for step in definition.steps if step.type == "human_approval"]
+        if not approvals or any(
+            self.repository.approval_binding(run_id, step.id) != expected
+            for step in approvals
+        ):
+            raise ValueError("approval does not bind the validated artifact")
 
     def recover(self, run_id: str) -> WorkflowRun:
         lock = LocalLock(self.broker.db.path, f"workflow:{run_id}")

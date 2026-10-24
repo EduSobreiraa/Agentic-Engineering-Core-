@@ -24,7 +24,7 @@ from aec.communication.schemas import (
 from aec.engineering.models import QAReviewResult
 from aec.security.identities import Identity, Role
 
-from .base import ExecutionAdapter
+from .base import ExecutionAdapter, ProcessObservationError
 from .locking import held
 from .models import AgentSession, ExecutionRequest, ExecutionResult, ExecutionStatus
 from .policy import ExecutionPolicy
@@ -41,6 +41,7 @@ class ExecutionManager:
         policy: ExecutionPolicy,
         max_concurrency: int = 2,
         writable_agents: frozenset[str] = frozenset(),
+        local_operators: frozenset[str] = frozenset(),
     ) -> None:
         if not allowed_roots or max_concurrency < 1:
             raise ValueError("allowed_roots and positive concurrency are required")
@@ -49,6 +50,7 @@ class ExecutionManager:
         self.allowed_roots = [root.resolve(strict=True) for root in allowed_roots]
         self.policy = policy
         self.writable_agents = writable_agents
+        self.local_operators = local_operators
         forbidden = {
             Path("/"),
             Path("/etc"),
@@ -121,6 +123,22 @@ class ExecutionManager:
                 request, identity, source_message_id, source
             )
 
+    async def reconcile_execution(
+        self, execution_id: str, actor: str, evidence: str,
+        *, effects_status: Literal["VERIFIED", "REVERTED", "UNKNOWN"],
+        confirm_workspace_inspected: bool = False,
+    ) -> None:
+        if actor not in self.local_operators:
+            raise PermissionError("local operator is not authorized")
+        if not evidence.strip():
+            raise ValueError("reconciliation evidence is required")
+        async with held(self.broker.db.path, "workspace-admission"):
+            self.repository.record_reconciliation(
+                execution_id, actor, evidence,
+                effects_status=effects_status,
+                confirm_workspace_inspected=confirm_workspace_inspected,
+            )
+
     async def _execute_authorized(
         self,
         request: ExecutionRequest,
@@ -145,15 +163,6 @@ class ExecutionManager:
                     "session does not belong to this agent and workspace"
                 )
             provider_session_id = session.provider_session_id
-        if not self.repository.create(request, source_message_id):
-            previous = self.repository.get(request.execution_id)
-            if isinstance(previous, ExecutionResult):
-                if previous.status == ExecutionStatus.SUCCEEDED:
-                    self._publish(source, identity, previous)
-                return previous
-            raise RuntimeError(
-                "execution already exists and cannot be repeated automatically"
-            )
         workspace_lock = self._workspaces.setdefault(
             request.working_directory, asyncio.Lock()
         )
@@ -162,12 +171,33 @@ class ExecutionManager:
             workspace_lock,
             held(self.broker.db.path, f"workspace:{request.working_directory}"),
         ):
-            self.repository.status(request.execution_id, ExecutionStatus.STARTING)
+            async with held(self.broker.db.path, "workspace-admission"):
+                if self.repository.get(request.execution_id) is not None:
+                    self.repository.create(request, source_message_id)
+                    previous = self.repository.get(request.execution_id)
+                    if isinstance(previous, ExecutionResult):
+                        if previous.status == ExecutionStatus.SUCCEEDED:
+                            self._publish(source, identity, previous)
+                        return previous
+                    raise RuntimeError(
+                        "execution already exists and cannot be repeated automatically"
+                    )
+                self.repository.require_workspace_available(
+                    request.working_directory
+                )
+                self.repository.create(request, source_message_id)
+                self.repository.status(request.execution_id, ExecutionStatus.STARTING)
             try:
                 if not await adapter.healthcheck():
                     raise RuntimeError("executor unavailable or not authenticated")
                 self.repository.status(request.execution_id, ExecutionStatus.RUNNING)
-                result = await adapter.execute(request, provider_session_id)
+                request._process_observer = self.repository.record_process
+                request._scope_observer = self.repository.record_scope
+                try:
+                    result = await adapter.execute(request, provider_session_id)
+                finally:
+                    request._process_observer = None
+                    request._scope_observer = None
                 if (
                     result.execution_id != request.execution_id
                     or result.agent_id != request.agent_id
@@ -175,14 +205,26 @@ class ExecutionManager:
                     raise ValueError("adapter returned another execution")
             except asyncio.CancelledError:
                 now = datetime.now(timezone.utc)
+                try:
+                    live_process = self.repository.processes_present(
+                        request.execution_id
+                    )
+                except RuntimeError:
+                    live_process = True
                 self.repository.finish(
                     ExecutionResult(
                         execution_id=request.execution_id,
                         agent_id=request.agent_id,
-                        status=ExecutionStatus.CANCELLED,
+                        status=(
+                            ExecutionStatus.INTERRUPTED
+                            if live_process else ExecutionStatus.CANCELLED
+                        ),
                         started_at=now,
                         finished_at=now,
-                        error="cancelled",
+                        error=(
+                            "cancelled_with_process_unreconciled"
+                            if live_process else "cancelled"
+                        ),
                     )
                 )
                 raise
@@ -191,7 +233,11 @@ class ExecutionManager:
                 result = ExecutionResult(
                     execution_id=request.execution_id,
                     agent_id=request.agent_id,
-                    status=ExecutionStatus.FAILED,
+                    status=(
+                        ExecutionStatus.INTERRUPTED
+                        if isinstance(exc, ProcessObservationError)
+                        else ExecutionStatus.FAILED
+                    ),
                     started_at=now,
                     finished_at=now,
                     error=type(exc).__name__,
@@ -229,6 +275,16 @@ class ExecutionManager:
                 except OSError:
                     result.status = ExecutionStatus.FAILED
                     result.error = "artifact_storage_failed"
+            try:
+                processes_present = self.repository.processes_present(
+                    request.execution_id
+                )
+            except RuntimeError:
+                processes_present = True
+                result.error = "execution_process_inspection_unavailable"
+            if processes_present:
+                result.status = ExecutionStatus.INTERRUPTED
+                result.error = result.error or "execution_process_still_present"
             self.repository.finish(result)
             if result.status == ExecutionStatus.SUCCEEDED:
                 self._publish(source, identity, result)

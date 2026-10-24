@@ -1,0 +1,19 @@
+AEC-SEC-001 — 2026-10-19
+
+Baseline reproduzida: security-audit@1.0.2 podia chegar a COMPLETED após unsafe.py ser restaurado para eval() entre reteste e aprovação. O resultado booleano do gate não preservava os bytes.
+
+Correção candidata: security-audit@1.0.3, definição SHA-256 d2ab1b0674f703d385beff5272a796f273644544cf7e6d83530af56dd0db39e5. Commit, bytes e manifest SHA-256 persistidos no SQLite; aprovação e conclusão conferem o vínculo. A versão 1.0.2 é bloqueada para seed, bind_run, Router e publish. Nenhuma versão foi publicada nesta execução.
+
+uv run ruff check .
+All checks passed!
+
+uv run mypy
+Success: no issues found in 79 source files
+
+uv run pytest -q
+178 passed, 8 skipped in 15.48s
+
+AEC_RUN_REAL_CODEX=1 uv run pytest -q -s tests/scenarios/test_phase7_workflows.py::test_real_static_audit_and_safe_fixture_correction
+1 passed in 114.46s
+
+O ensaio real terminou em WAITING_APPROVAL, sem aprovação humana. Fixtures verificaram aprovação com digest correto, rejeição de digest incorreto ou arquivo alterado, bloqueio de conclusão após alteração, recuperação após reinício, escrita externa, execução histórica 1.0.2 já vinculada e hash no relatório. O cenário de processo Codex órfão por queda abrupta permanece em AEC-RES-002. Snapshot e commit são a referência; workspace mutável requer reconferência antes de promoção. Sandbox de SO e execução não confiável seguem bloqueados.

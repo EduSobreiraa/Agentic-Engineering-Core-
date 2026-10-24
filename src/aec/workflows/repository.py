@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 from datetime import datetime, timezone
@@ -9,7 +10,14 @@ from datetime import datetime, timezone
 from aec.persistence.database import Database
 
 from .loader import definition_hash
-from .models import StepRun, StepStatus, WorkflowDefinition, WorkflowRun, WorkflowStatus
+from .models import (
+    StepRun,
+    StepStatus,
+    WorkflowDefinition,
+    WorkflowRun,
+    WorkflowStatus,
+    WorkflowTaskInput,
+)
 from .state_machine import check_transition
 
 
@@ -26,6 +34,7 @@ class WorkflowRepository:
         run_id: str,
         definition: WorkflowDefinition,
         binding: tuple[str, str, str] | None = None,
+        task_input: WorkflowTaskInput | None = None,
     ) -> WorkflowRun:
         created = now()
         with self.db.connect() as db:
@@ -49,8 +58,26 @@ class WorkflowRepository:
                     "INSERT INTO methodology_run_bindings VALUES (?,?,?,?)",
                     (run_id, *binding),
                 )
+            if task_input is not None:
+                content = task_input.model_dump_json()
+                db.execute(
+                    "INSERT INTO workflow_run_inputs VALUES (?,?,?)",
+                    (run_id, content, hashlib.sha256(content.encode()).hexdigest()),
+                )
             self._event(db, run_id, None, "CREATED", None)
         return self.get_run(run_id)
+
+    def task_input(self, run_id: str) -> WorkflowTaskInput | None:
+        with self.db.connect() as db:
+            row = db.execute(
+                "SELECT content,sha256 FROM workflow_run_inputs WHERE run_id=?",
+                (run_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        if hashlib.sha256(row["content"].encode()).hexdigest() != row["sha256"]:
+            raise RuntimeError("stored workflow task input hash mismatch")
+        return WorkflowTaskInput.model_validate_json(row["content"])
 
     def definition(self, run_id: str) -> WorkflowDefinition:
         with self.db.connect() as db:
@@ -230,7 +257,15 @@ class WorkflowRepository:
                 json.dumps(result) if result is not None else None,
             )
 
-    def decide(self, run_id: str, step_id: str, actor: str, approved: bool) -> None:
+    def decide(
+        self,
+        run_id: str,
+        step_id: str,
+        actor: str,
+        approved: bool,
+        *,
+        manifest_sha256: str | None = None,
+    ) -> None:
         with self.db.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             row = db.execute(
@@ -239,18 +274,69 @@ class WorkflowRepository:
             ).fetchone()
             if row is None or row["status"] != "PENDING":
                 raise ValueError("approval is absent or already decided")
+            workflow = db.execute(
+                "SELECT definition,definition_hash FROM workflow_runs WHERE run_id=?",
+                (run_id,),
+            ).fetchone()
+            assert workflow is not None
+            definition = WorkflowDefinition.model_validate_json(workflow["definition"])
+            guarded = "approval_binding" in definition.metadata
+            if approved and guarded != (manifest_sha256 is not None):
+                raise ValueError("approval manifest binding is required")
+            binding = None
+            if approved and manifest_sha256 is not None:
+                if len(manifest_sha256) != 64 or any(
+                    c not in "0123456789abcdef" for c in manifest_sha256
+                ):
+                    raise ValueError("invalid approval manifest digest")
+                binding = db.execute(
+                    "SELECT methodology_id,version,sha256 FROM "
+                    "methodology_run_bindings WHERE run_id=?",
+                    (run_id,),
+                ).fetchone()
+                if binding is None:
+                    raise ValueError("guarded approval requires published methodology")
             db.execute(
                 "UPDATE workflow_approvals SET status=?,decided_by=?,decided_at=? "
                 "WHERE run_id=? AND step_id=?",
                 ("APPROVED" if approved else "REJECTED", actor, now(), run_id, step_id),
             )
+            if binding is not None:
+                db.execute(
+                    "INSERT INTO workflow_approval_bindings VALUES (?,?,?,?,?,?,?)",
+                    (
+                        run_id, step_id, manifest_sha256,
+                        workflow["definition_hash"], binding["methodology_id"],
+                        binding["version"], binding["sha256"],
+                    ),
+                )
             new = StepStatus.SUCCEEDED if approved else StepStatus.FAILED
             db.execute(
                 "UPDATE workflow_steps SET status=?,finished_at=?,result=? "
                 "WHERE run_id=? AND step_id=?",
-                (new, now(), json.dumps({"approved": approved}), run_id, step_id),
+                (
+                    new, now(),
+                    json.dumps(
+                        {"approved": approved, "manifest_sha256": manifest_sha256}
+                        if manifest_sha256 is not None
+                        else {"approved": approved}
+                    ),
+                    run_id, step_id,
+                ),
             )
             self._event(db, run_id, step_id, new, actor)
+
+    def approval_binding(self, run_id: str, step_id: str) -> tuple[str, ...] | None:
+        with self.db.connect() as db:
+            row = db.execute(
+                "SELECT a.manifest_sha256,a.definition_hash,a.methodology_id,"
+                "a.version,a.methodology_sha256 FROM workflow_approval_bindings a "
+                "JOIN workflow_approvals p ON p.run_id=a.run_id "
+                "AND p.step_id=a.step_id "
+                "WHERE a.run_id=? AND a.step_id=? AND p.status='APPROVED'",
+                (run_id, step_id),
+            ).fetchone()
+        return tuple(str(value) for value in row) if row else None
 
     def approval_status(self, run_id: str, step_id: str) -> str | None:
         with self.db.connect() as db:
