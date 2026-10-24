@@ -12,6 +12,11 @@ from aec.execution.base import ExecutionAdapter
 from aec.execution.manager import ExecutionManager
 from aec.execution.models import ExecutionRequest, ExecutionResult, ExecutionStatus
 from aec.execution.policy import ExecutionPolicy
+from aec.methodologies.skills import (
+    SkillRegistry,
+    SkillState,
+    inspect_local_skill,
+)
 from aec.methodology.contracts import MethodologyVersion
 from aec.methodology.governance import MethodologyRegistry
 from aec.security.identities import Role
@@ -21,6 +26,7 @@ from aec.workflows.models import (
     StepStatus,
     WorkflowDefinition,
     WorkflowStatus,
+    WorkflowStep,
     WorkflowTaskInput,
 )
 from aec.workflows.state_machine import check_transition
@@ -74,6 +80,44 @@ def setup_engine(tmp_path: Path) -> tuple[WorkflowEngine, SimulatedAdapter]:
         local_approvers=frozenset({"supervisor"}),
     )
     return engine, adapter
+
+
+def test_approved_skill_is_bound_and_rechecked_before_turn(tmp_path: Path) -> None:
+    engine, adapter = setup_engine(tmp_path)
+    root = tmp_path / "skills"
+    root.mkdir()
+    path = root / "SKILL.md"
+    path.write_text("Use short sentences.")
+    reference = inspect_local_skill(
+        "short-writing", path, tmp_path,
+        compatible_executors=frozenset({"simulated"}),
+        required_permissions=frozenset({"read-only"}),
+    )
+    registry = SkillRegistry(frozenset({"supervisor"}))
+    registry.register(reference)
+    assert registry.validate(
+        "short-writing", "simulated", frozenset({"read-only"})
+    ) == SkillState.VALIDATED
+    with pytest.raises(PermissionError):
+        registry.enable("short-writing", "agent")
+    registry.enable("short-writing", "supervisor")
+    engine.skill_registry = registry
+    definition = WorkflowDefinition(
+        id="skill-check", version="1.0.0", name="Skill check",
+        steps=[WorkflowStep(
+            id="write", type="agent", agent="implementer",
+            executor="simulated", inputs={"prompt": "Write a sentence."},
+        )],
+    )
+    engine.create(definition, "skill-ok", skills={"write": ("short-writing",)})
+    assert asyncio.run(engine.run("skill-ok")).status == WorkflowStatus.COMPLETED
+    assert "Use short sentences." in adapter.prompts[0]
+    binding = engine.repository.skill_bindings("skill-ok", "write")[0]
+    assert binding["sha256"] == reference.sha256
+    engine.create(definition, "skill-changed", skills={"write": ("short-writing",)})
+    path.write_text("Changed after binding.")
+    assert asyncio.run(engine.run("skill-changed")).status == WorkflowStatus.FAILED
+    assert len(adapter.prompts) == 1
 
 
 def example() -> WorkflowDefinition:

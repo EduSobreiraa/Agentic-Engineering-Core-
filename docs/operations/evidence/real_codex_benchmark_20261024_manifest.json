@@ -1,0 +1,65 @@
+{
+  "database_archive": "not copied: operational SQLite may contain Codex session identifiers; original local files remain at the paths below",
+  "report": "real_codex_benchmark_20261024.json",
+  "report_bytes": 11812,
+  "report_sha256": "38db439e4a13b52dc9cb45a05bfaf1082ea41090b862b803fddd9114e81e1e83",
+  "runs": [
+    {
+      "arm": "baseline",
+      "database_digest_verified": true,
+      "database_path": "/tmp/aec-bench-real-20261024/migration/baseline/aec.sqlite",
+      "database_sha256": "88924c549eb0346fab33c70ab08e7e0e6a9fdafe8d5150b35d093c881b26cda0",
+      "database_size_bytes": 360448,
+      "run_id": "migration-baseline",
+      "task_id": "migration"
+    },
+    {
+      "arm": "candidate",
+      "database_digest_verified": true,
+      "database_path": "/tmp/aec-bench-real-20261024/migration/candidate/aec.sqlite",
+      "database_sha256": "c29352f8abab82e6acd9ce4232c605d24fcaa77dfa4c1d35e2f0bec604bd3911",
+      "database_size_bytes": 372736,
+      "run_id": "migration-candidate",
+      "task_id": "migration"
+    },
+    {
+      "arm": "candidate",
+      "database_digest_verified": true,
+      "database_path": "/tmp/aec-bench-real-20261024/active-voice/candidate/aec.sqlite",
+      "database_sha256": "ba026d245c0def5c9c53553221969905c102d488dee20a2c975a9e3980249a2e",
+      "database_size_bytes": 372736,
+      "run_id": "active-voice-candidate",
+      "task_id": "active-voice"
+    },
+    {
+      "arm": "baseline",
+      "database_digest_verified": true,
+      "database_path": "/tmp/aec-bench-real-20261024/active-voice/baseline/aec.sqlite",
+      "database_sha256": "a23e863a91a1adbf3faf278666f455aa488d8355c8f51ee9cf9dd616ab02bef0",
+      "database_size_bytes": 360448,
+      "run_id": "active-voice-baseline",
+      "task_id": "active-voice"
+    },
+    {
+      "arm": "baseline",
+      "database_digest_verified": true,
+      "database_path": "/tmp/aec-bench-real-20261024/concise-action/baseline/aec.sqlite",
+      "database_sha256": "0cae515bbd5aa1d0e8d685bc16dbb9fe7052a25f0972ae34a9943f28f2923151",
+      "database_size_bytes": 360448,
+      "run_id": "concise-action-baseline",
+      "task_id": "concise-action"
+    },
+    {
+      "arm": "candidate",
+      "database_digest_verified": true,
+      "database_path": "/tmp/aec-bench-real-20261024/concise-action/candidate/aec.sqlite",
+      "database_sha256": "d6d734f82b7c68afd2c20cda12f66741ea588a90279aeaae05775c9078f87149",
+      "database_size_bytes": 372736,
+      "run_id": "concise-action-candidate",
+      "task_id": "concise-action"
+    }
+  ],
+  "skill_sha256": "0503149a9b85dad02bbc747a3aeb534e2ba07f53c5fd57e491ea3d1e67659aa3",
+  "task_inputs": "real_codex_benchmark_20261024_tasks.json",
+  "task_inputs_sha256": "9a94d1f60af969ded40a7a525ab2a5874f303bb12ddf3833b88d18dd6d8fea1d"
+}

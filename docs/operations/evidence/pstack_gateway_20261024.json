@@ -1,0 +1,29 @@
+{
+  "acceptance": "team and migration or move present; leveraged absent",
+  "approver": "edupires",
+  "conclusion": "INCONCLUSIVE: one run per arm is insufficient for a gain claim",
+  "executor": "Codex CLI",
+  "gateway_response": {
+    "skill_id": "pstack:unslop",
+    "status": "ENABLED"
+  },
+  "prompt_sha256": "1d17570144aa815244d59d2a4014480c4d5c0dded3a9d7dde9b03e9e102b1112",
+  "results": [
+    {
+      "acp_prompt_matches_adapter": true,
+      "adapter_prompt_sha256": "4f32b55905bddc8170e324a659c8102154c9b86fa2d7798f0e7300dc141df796",
+      "bound_approver": "edupires",
+      "bound_skill_sha256": "0503149a9b85dad02bbc747a3aeb534e2ba07f53c5fd57e491ea3d1e67659aa3",
+      "database": "/tmp/aec-int-001-20261024/with-skill/aec.sqlite",
+      "gate_passed": true,
+      "output": "The team used several methods to help with the move.",
+      "output_sha256": "b771ae33e0d53647920c93b17885ef4777a78c474b098793513f621cf483b375",
+      "run_id": "with-skill",
+      "skill_text_in_adapter_prompt": true,
+      "status": "COMPLETED"
+    }
+  ],
+  "sandbox": "read-only",
+  "skill_id": "pstack:unslop",
+  "skill_sha256": "0503149a9b85dad02bbc747a3aeb534e2ba07f53c5fd57e491ea3d1e67659aa3"
+}

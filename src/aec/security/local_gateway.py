@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 
 if TYPE_CHECKING:
     from aec.execution.manager import ExecutionManager
+    from aec.methodologies.skills import SkillRegistry
     from aec.methodology.governance import MethodologyGovernance
     from aec.workflows.engine import WorkflowEngine
 
@@ -48,6 +49,7 @@ class LocalApprovalGateway(socketserver.UnixStreamServer):
         methodology: MethodologyGovernance | None = None,
         workflows: WorkflowEngine | None = None,
         executions: ExecutionManager | None = None,
+        skills: SkillRegistry | None = None,
     ) -> None:
         if os.name != "posix" or not hasattr(socket, "SO_PEERCRED"):
             raise RuntimeError("Linux peer credentials are required")
@@ -60,6 +62,7 @@ class LocalApprovalGateway(socketserver.UnixStreamServer):
         self.methodology = methodology
         self.workflows = workflows
         self.executions = executions
+        self.skills = skills
         super().__init__(str(path), _OperatorHandler)
         os.chmod(path, 0o660)
         self._inode = path.stat().st_ino
@@ -164,6 +167,13 @@ class LocalApprovalGateway(socketserver.UnixStreamServer):
                 )
             )
             return {"status": "RECONCILED"}
+        if action == "skill.enable":
+            _keys(request, {"action", "skill_id"})
+            if self.skills is None:
+                raise ValueError("skill registry is unavailable")
+            skill_id = _string(request, "skill_id")
+            self.skills.enable(skill_id, actor)
+            return {"status": "ENABLED", "skill_id": skill_id}
         raise ValueError("unknown action")
 
 

@@ -24,9 +24,21 @@ from aec.communication.schemas import (
 from aec.engineering.models import QAReviewResult
 from aec.security.identities import Identity, Role
 
-from .base import ExecutionAdapter, ProcessObservationError
-from .locking import held
-from .models import AgentSession, ExecutionRequest, ExecutionResult, ExecutionStatus
+from .base import (
+    ExecutionAdapter,
+    ExecutionLimitExceeded,
+    ModelPolicyError,
+    ProcessObservationError,
+)
+from .locking import held, held_slot
+from .models import (
+    AgentSession,
+    CodexSettings,
+    ExecutionBudget,
+    ExecutionRequest,
+    ExecutionResult,
+    ExecutionStatus,
+)
 from .policy import ExecutionPolicy
 from .repository import ExecutionRepository
 
@@ -42,6 +54,8 @@ class ExecutionManager:
         max_concurrency: int = 2,
         writable_agents: frozenset[str] = frozenset(),
         local_operators: frozenset[str] = frozenset(),
+        budget: ExecutionBudget | None = None,
+        model_by_agent: dict[str, CodexSettings] | None = None,
     ) -> None:
         if not allowed_roots or max_concurrency < 1:
             raise ValueError("allowed_roots and positive concurrency are required")
@@ -51,6 +65,13 @@ class ExecutionManager:
         self.policy = policy
         self.writable_agents = writable_agents
         self.local_operators = local_operators
+        self.budget = budget
+        if (
+            budget is not None and budget.version == "2"
+            and budget.max_concurrent_agents != max_concurrency
+        ):
+            raise ValueError("concurrency must match the version 2 execution policy")
+        self.model_by_agent = model_by_agent or {}
         forbidden = {
             Path("/"),
             Path("/etc"),
@@ -62,8 +83,9 @@ class ExecutionManager:
         if any(root in forbidden for root in self.allowed_roots):
             raise ValueError("sensitive directory cannot be an execution root")
         self.repository = ExecutionRepository(broker.db)
+        self.repository.bind_concurrency(max_concurrency)
         self.repository.reconcile()
-        self._slots = asyncio.Semaphore(max_concurrency)
+        self.max_concurrency = max_concurrency
         self._workspaces: dict[Path, asyncio.Lock] = {}
 
     def _authorize(
@@ -118,10 +140,36 @@ class ExecutionManager:
         source_message_id: str,
     ) -> ExecutionResult:
         source = self._authorize(request, identity, source_message_id)
+        request = request.model_copy(deep=True)
+        self._resolve_codex_settings(request, source, identity)
         async with held(self.broker.db.path, f"execution:{request.execution_id}"):
             return await self._execute_authorized(
                 request, identity, source_message_id, source
             )
+
+    def _resolve_codex_settings(
+        self, request: ExecutionRequest, source: Message, identity: Identity
+    ) -> None:
+        keys = {"codex_model", "codex_reasoning_effort"}
+        if keys & request.metadata.keys():
+            raise ModelPolicyError("Codex settings must come from the orchestrator")
+        configured = self.model_by_agent.get(identity.agent_id, CodexSettings())
+        values = {
+            "model": source.metadata.get("codex_model", configured.model),
+            "reasoning_effort": source.metadata.get(
+                "codex_reasoning_effort", configured.reasoning_effort
+            ),
+        }
+        try:
+            settings = CodexSettings.model_validate(values)
+        except ValueError as exc:
+            raise ModelPolicyError("invalid Codex model policy") from exc
+        if request.executor != "codex" and settings != CodexSettings():
+            raise ModelPolicyError("Codex settings require the Codex executor")
+        if settings.model != "default":
+            request.metadata["codex_model"] = settings.model
+        if settings.reasoning_effort != "default":
+            request.metadata["codex_reasoning_effort"] = settings.reasoning_effort
 
     async def reconcile_execution(
         self, execution_id: str, actor: str, evidence: str,
@@ -167,7 +215,7 @@ class ExecutionManager:
             request.working_directory, asyncio.Lock()
         )
         async with (
-            self._slots,
+            held_slot(self.broker.db.path, self.max_concurrency),
             workspace_lock,
             held(self.broker.db.path, f"workspace:{request.working_directory}"),
         ):
@@ -185,6 +233,25 @@ class ExecutionManager:
                 self.repository.require_workspace_available(
                     request.working_directory
                 )
+                budget = self.repository.budget_for_run(request.run_id, self.budget)
+                if budget is not None and budget.version == "2":
+                    assert budget.execution_timeout_seconds is not None
+                    assert budget.max_duration_seconds is not None
+                    if request.timeout_seconds > budget.execution_timeout_seconds:
+                        self._block(
+                            source_message_id, identity, "execution_timeout_seconds"
+                        )
+                    started = self.repository.run_origin(request.run_id)
+                    if started is not None and (
+                        datetime.now(timezone.utc) - started
+                    ).total_seconds() >= budget.max_duration_seconds:
+                        self._block(source_message_id, identity, "max_duration_seconds")
+                if (
+                    budget is not None
+                    and self.repository.count_for_run(request.run_id)
+                    >= budget.max_invocations_per_run
+                ):
+                    self._block(source_message_id, identity, "max_invocations_per_run")
                 self.repository.create(request, source_message_id)
                 self.repository.status(request.execution_id, ExecutionStatus.STARTING)
             try:
@@ -289,6 +356,16 @@ class ExecutionManager:
             if result.status == ExecutionStatus.SUCCEEDED:
                 self._publish(source, identity, result)
             return result
+
+    def _block(self, source_message_id: str, identity: Identity, reason: str) -> None:
+        with self.broker.db.connect() as db:
+            db.execute(
+                "INSERT INTO events(message_id,agent_id,kind,detail,created_at) "
+                "VALUES (?,?,?,?,?)",
+                (source_message_id, identity.agent_id, "EXECUTION_BLOCKED", reason,
+                 datetime.now(timezone.utc).isoformat()),
+            )
+        raise ExecutionLimitExceeded(reason)
 
     def _store_output(self, request: ExecutionRequest, output: str) -> ArtifactRef:
         artifact_id = hashlib.sha256(request.execution_id.encode()).hexdigest()

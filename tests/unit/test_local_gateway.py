@@ -71,6 +71,14 @@ class Executions:
         )
 
 
+class Skills:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str]] = []
+
+    def enable(self, skill_id: str, actor: str) -> None:
+        self.calls.append((skill_id, actor))
+
+
 def send(server: LocalApprovalGateway, request: dict[str, object]) -> dict[str, str]:
     thread = threading.Thread(target=server.handle_request)
     thread.start()
@@ -185,3 +193,22 @@ def test_unknown_uid_or_disallowed_action_rejected(tmp_path: Path) -> None:
             gateway, {"action": "methodology.publish", "proposal_id": "p-1"}
         ) == {"error": "PermissionError"}
     assert decisions.calls == []
+
+
+@pytest.mark.skipif(not hasattr(socket, "SO_PEERCRED"), reason="Linux only")
+def test_skill_enable_requires_verified_local_operator(tmp_path: Path) -> None:
+    skills = Skills()
+    with LocalApprovalGateway(
+        tmp_path / "approvals.sock",
+        {os.getuid(): LocalOperator("verified-user", frozenset({"skill.enable"}))},
+        skills=cast(Any, skills),
+    ) as gateway:
+        assert send(gateway, {
+            "action": "skill.enable", "skill_id": "pstack:unslop"
+        }) == {
+            "status": "ENABLED", "skill_id": "pstack:unslop"
+        }
+        assert send(gateway, {
+            "action": "skill.enable", "skill_id": "pstack:unslop", "actor": "forged"
+        }) == {"error": "ValueError"}
+    assert skills.calls == [("pstack:unslop", "verified-user")]

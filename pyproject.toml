@@ -10,6 +10,9 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = ["pydantic>=2,<3", "PyYAML>=6,<7"]
 
+[project.scripts]
+aec = "aec.operations.cli:main"
+
 [project.optional-dependencies]
 dev = [
     "mypy>=1.11",

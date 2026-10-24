@@ -14,7 +14,12 @@ from math import ceil
 from uuid import uuid4
 
 from aec.execution.base import ExecutionAdapter, ProcessObservationError
-from aec.execution.models import ExecutionRequest, ExecutionResult, ExecutionStatus
+from aec.execution.models import (
+    CodexSettings,
+    ExecutionRequest,
+    ExecutionResult,
+    ExecutionStatus,
+)
 from aec.execution.policy import ExecutionPolicy
 
 
@@ -164,6 +169,18 @@ class CodexCliAdapter(ExecutionAdapter):
             request.sandbox_mode,
             "--skip-git-repo-check",
         ]
+        settings = CodexSettings.model_validate({
+            "model": request.metadata.get("codex_model", "default"),
+            "reasoning_effort": request.metadata.get(
+                "codex_reasoning_effort", "default"
+            ),
+        })
+        if settings.model != "default":
+            args.extend(["--model", settings.model])
+        if settings.reasoning_effort != "default":
+            args.extend([
+                "--config", f"model_reasoning_effort={settings.reasoning_effort}"
+            ])
         if provider_session_id:
             args.extend(["resume", provider_session_id, "-"])
         else:

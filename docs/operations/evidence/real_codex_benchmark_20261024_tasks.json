@@ -1,0 +1,42 @@
+[
+  {
+    "acceptance_sha256": "b3d42dd884e5588fa343c0e54dd44ecb7b203bbe6f626b5b2cacc0f234041d9c",
+    "forbidden": [
+      "leveraged",
+      "facilitate",
+      "multifaceted"
+    ],
+    "prompt": "Rewrite in plain English, one sentence only: The team leveraged a multifaceted approach to facilitate the migration. Keep the word migration.",
+    "required": [
+      "team",
+      "migration"
+    ],
+    "task_id": "migration"
+  },
+  {
+    "acceptance_sha256": "33b563935db86bcf40582b8880d3e200f33a17ae2c4dc8d3efeae944c366fd98",
+    "forbidden": [
+      "was reviewed"
+    ],
+    "prompt": "Rewrite in active voice, one sentence only: The report was reviewed by the team yesterday.",
+    "required": [
+      "team",
+      "report",
+      "review"
+    ],
+    "task_id": "active-voice"
+  },
+  {
+    "acceptance_sha256": "e7bc9507fb6f0937c311f273f9cce8f25beb0b052c91d523728ce65971bc7985",
+    "forbidden": [
+      "in order to",
+      "make a decision"
+    ],
+    "prompt": "Rewrite concisely, one sentence only: In order to begin the test, we need to make a decision about the configuration.",
+    "required": [
+      "test",
+      "configuration"
+    ],
+    "task_id": "concise-action"
+  }
+]
