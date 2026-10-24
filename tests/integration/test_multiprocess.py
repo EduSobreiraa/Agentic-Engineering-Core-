@@ -16,9 +16,14 @@ import pytest
 from aec.communication.broker import Broker, ClaimedDelivery
 from aec.communication.errors import StateError
 from aec.communication.schemas import Message, MessageType, TaskAssigned
-from aec.execution.base import ExecutionAdapter
+from aec.execution.base import ExecutionAdapter, ExecutionLimitExceeded
 from aec.execution.manager import ExecutionManager
-from aec.execution.models import ExecutionRequest, ExecutionResult, ExecutionStatus
+from aec.execution.models import (
+    ExecutionBudget,
+    ExecutionRequest,
+    ExecutionResult,
+    ExecutionStatus,
+)
 from aec.execution.policy import ExecutionPolicy
 from aec.methodology.benchmark import LocalBenchmarkRunner
 from aec.methodology.governance import (
@@ -227,6 +232,9 @@ def _execute(
     execution_id: str = "one-execution",
     source_id: str = "multiprocess-assignment",
     exit_after_finish: bool = False,
+    max_concurrency: int = 2,
+    budget_limit: int | None = None,
+    signal_ready: bool = False,
 ) -> None:
     broker = Broker(database)
     implementer = broker.register("implementer", Role.IMPLEMENTER)
@@ -236,6 +244,13 @@ def _execute(
         {"fake": DurableAdapter(database, pipe)},
         [Path(workspace)],
         policy=policy,
+        max_concurrency=max_concurrency,
+        budget=(ExecutionBudget(
+            version="2", max_concurrent_agents=max_concurrency,
+            max_invocations_per_run=budget_limit, max_retries=0,
+            execution_timeout_seconds=120, max_duration_seconds=300,
+            max_iterations=1,
+        ) if budget_limit is not None else None),
     )
     request = ExecutionRequest(
         execution_id=execution_id,
@@ -246,7 +261,13 @@ def _execute(
         prompt="done",
         working_directory=Path(workspace),
     )
-    result = asyncio.run(manager.execute(request, implementer, source_id))
+    if signal_ready:
+        pipe.send("ready")
+    try:
+        result = asyncio.run(manager.execute(request, implementer, source_id))
+    except ExecutionLimitExceeded:
+        pipe.send("blocked")
+        return
     pipe.send(result.status.value)
     if exit_after_finish:
         os._exit(12)
@@ -383,6 +404,61 @@ def test_two_processes_serialize_shared_workspace(tmp_path: Path) -> None:
             0,
             1,
         )
+
+
+def test_budget_and_concurrency_across_processes_with_distinct_workspaces(
+    tmp_path: Path,
+) -> None:
+    ctx = multiprocessing.get_context("spawn")
+    database, _ = _setup_execution(tmp_path)
+    workspaces = [tmp_path / name for name in ("work-a", "work-b", "work-c")]
+    for workspace in workspaces:
+        workspace.mkdir()
+    broker = Broker(database)
+    sender = broker.register("orchestrator", Role.ORCHESTRATOR)
+    original = broker.get_message("multiprocess-assignment")
+    assert original is not None
+    for index in (2, 3):
+        broker.publish(
+            original.model_copy(update={"message_id": f"assignment-{index}"}),
+            sender,
+        )
+    processes: list[BaseProcess] = []
+    parents: list[Connection] = []
+    for index, workspace in enumerate(workspaces, start=1):
+        parent, child = ctx.Pipe()
+        source_id = (
+            "multiprocess-assignment" if index == 1 else f"assignment-{index}"
+        )
+        worker = ctx.Process(
+            target=_execute,
+            args=(database, str(workspace), child, f"execution-{index}",
+                  source_id, False, 1, 2, True),
+        )
+        processes.append(worker)
+        parents.append(parent)
+    processes[0].start()
+    assert _receive(parents[0]) == "ready"
+    assert _receive(parents[0]) == "entered"
+    processes[1].start()
+    assert _receive(parents[1]) == "ready"
+    assert not parents[1].poll(0.2)
+    parents[0].send("release")
+    assert _receive(parents[0]) == ExecutionStatus.SUCCEEDED.value
+    assert _receive(parents[1]) == "entered"
+    parents[1].send("release")
+    assert _receive(parents[1]) == ExecutionStatus.SUCCEEDED.value
+    processes[2].start()
+    assert _receive(parents[2]) == "ready"
+    assert _receive(parents[2]) == "blocked"
+    for process in processes:
+        _join(process)
+    with sqlite3.connect(database) as db:
+        assert db.execute("SELECT active,peak FROM concurrent_effects").fetchone() == (
+            0, 1,
+        )
+        assert db.execute("SELECT COUNT(*) FROM executions").fetchone()[0] == 2
+        assert db.execute("SELECT COUNT(*) FROM external_effects").fetchone()[0] == 2
 
 
 def test_two_processes_drive_workflow_once(tmp_path: Path) -> None:

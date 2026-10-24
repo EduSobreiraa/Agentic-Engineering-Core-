@@ -9,6 +9,14 @@ class ProcessObservationError(RuntimeError):
     """A spawned process could not be linked to durable execution state."""
 
 
+class ExecutionLimitExceeded(RuntimeError):
+    """A deterministic admission limit blocked a new external invocation."""
+
+
+class ModelPolicyError(ValueError):
+    """Requested Codex settings failed deterministic validation."""
+
+
 class ExecutionAdapter(ABC):
     @abstractmethod
     async def execute(

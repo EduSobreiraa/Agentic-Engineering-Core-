@@ -13,13 +13,85 @@ from typing import Literal
 
 from aec.persistence.database import Database
 
+from .base import ExecutionLimitExceeded
 from .locking import LocalLock
-from .models import AgentSession, ExecutionRequest, ExecutionResult, ExecutionStatus
+from .models import (
+    AgentSession,
+    ExecutionBudget,
+    ExecutionRequest,
+    ExecutionResult,
+    ExecutionStatus,
+)
 
 
 class ExecutionRepository:
     def __init__(self, database: Database) -> None:
         self.db = database
+
+    def bind_concurrency(self, maximum: int) -> None:
+        with self.db.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                "SELECT version,max_concurrency FROM execution_concurrency_policy "
+                "WHERE policy_id=1"
+            ).fetchone()
+            if row is None:
+                db.execute(
+                    "INSERT INTO execution_concurrency_policy VALUES (1,'1',?)",
+                    (maximum,),
+                )
+            elif row["version"] != "1" or row["max_concurrency"] != maximum:
+                raise ExecutionLimitExceeded(
+                    "concurrency differs from persisted policy"
+                )
+
+    def count_for_run(self, run_id: str) -> int:
+        with self.db.connect() as db:
+            return int(db.execute(
+                "SELECT COUNT(*) FROM executions WHERE run_id=?", (run_id,)
+            ).fetchone()[0])
+
+    def run_origin(self, run_id: str) -> datetime | None:
+        with self.db.connect() as db:
+            row = db.execute(
+                "SELECT COALESCE(started_at,created_at) AS origin "
+                "FROM workflow_runs WHERE run_id=?", (run_id,)
+            ).fetchone()
+            if row is None:
+                row = db.execute(
+                    "SELECT MIN(created_at) AS origin FROM executions WHERE run_id=?",
+                    (run_id,),
+                ).fetchone()
+        if row is None or row["origin"] is None:
+            return None
+        return datetime.fromisoformat(row["origin"])
+
+    def budget_for_run(
+        self, run_id: str, configured: ExecutionBudget | None
+    ) -> ExecutionBudget | None:
+        with self.db.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                "SELECT content,sha256 FROM run_execution_budgets WHERE run_id=?",
+                (run_id,),
+            ).fetchone()
+            if row is None:
+                if configured is not None:
+                    content = configured.model_dump_json()
+                    db.execute(
+                        "INSERT INTO run_execution_budgets VALUES (?,?,?)",
+                        (run_id, content, sha256(content.encode()).hexdigest()),
+                    )
+                return configured
+            if sha256(row["content"].encode()).hexdigest() != row["sha256"]:
+                raise ExecutionLimitExceeded("run budget integrity failed")
+            try:
+                stored = ExecutionBudget.model_validate_json(row["content"])
+            except ValueError as exc:
+                raise ExecutionLimitExceeded("run budget is invalid") from exc
+            if configured is not None and configured != stored:
+                raise ExecutionLimitExceeded("run budget differs from persisted policy")
+            return stored
 
     def reconcile(self) -> int:
         now = datetime.now(timezone.utc).isoformat()
@@ -244,6 +316,14 @@ class ExecutionRepository:
                     ExecutionStatus.CREATED,
                     now,
                     now,
+                ),
+            )
+            db.execute(
+                "INSERT INTO execution_settings VALUES (?,?,?,NULL)",
+                (
+                    request.execution_id,
+                    request.metadata.get("codex_model", "default"),
+                    request.metadata.get("codex_reasoning_effort", "default"),
                 ),
             )
             return True

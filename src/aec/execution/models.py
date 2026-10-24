@@ -1,12 +1,21 @@
 """Public execution contracts."""
 
+from __future__ import annotations
+
 from collections.abc import Callable
 from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    PrivateAttr,
+    field_validator,
+    model_validator,
+)
 
 from aec.communication.schemas import ArtifactRef
 
@@ -20,6 +29,47 @@ class ExecutionStatus(StrEnum):
     TIMED_OUT = "TIMED_OUT"
     CANCELLED = "CANCELLED"
     INTERRUPTED = "INTERRUPTED"
+
+
+class CodexSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    model: Annotated[str, Field(pattern=r"^(default|[A-Za-z0-9._-]+)$")] = "default"
+    reasoning_effort: Literal[
+        "default", "low", "medium", "high", "xhigh", "max"
+    ] = "default"
+
+
+class ExecutionBudget(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    version: Literal["1", "2"] = "1"
+    max_invocations_per_run: Annotated[int, Field(ge=1)]
+    max_concurrent_agents: Annotated[int, Field(ge=1)] | None = None
+    max_retries: Annotated[int, Field(ge=0)] | None = None
+    execution_timeout_seconds: Annotated[float, Field(gt=0)] | None = None
+    max_duration_seconds: Annotated[float, Field(gt=0)] | None = None
+    max_iterations: Annotated[int, Field(ge=1)] | None = None
+
+    @model_validator(mode="after")
+    def versioned_fields(self) -> ExecutionBudget:
+        limits = (
+            self.max_concurrent_agents, self.max_retries,
+            self.execution_timeout_seconds, self.max_duration_seconds,
+            self.max_iterations,
+        )
+        if self.version == "1" and any(limit is not None for limit in limits):
+            raise ValueError("version 1 only supports an invocation limit")
+        if self.version == "2" and any(limit is None for limit in limits):
+            raise ValueError("version 2 requires all execution limits")
+        if (
+            self.version == "2"
+            and self.execution_timeout_seconds is not None
+            and self.max_duration_seconds is not None
+            and self.execution_timeout_seconds > self.max_duration_seconds
+        ):
+            raise ValueError("turn timeout exceeds run duration")
+        return self
 
 
 class ExecutionRequest(BaseModel):

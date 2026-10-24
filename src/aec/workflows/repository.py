@@ -35,6 +35,7 @@ class WorkflowRepository:
         definition: WorkflowDefinition,
         binding: tuple[str, str, str] | None = None,
         task_input: WorkflowTaskInput | None = None,
+        skills: tuple[tuple[str, str, str, str, str], ...] = (),
     ) -> WorkflowRun:
         created = now()
         with self.db.connect() as db:
@@ -64,8 +65,21 @@ class WorkflowRepository:
                     "INSERT INTO workflow_run_inputs VALUES (?,?,?)",
                     (run_id, content, hashlib.sha256(content.encode()).hexdigest()),
                 )
+            db.executemany(
+                "INSERT INTO workflow_skill_bindings VALUES (?,?,?,?,?,?)",
+                [(run_id, *skill) for skill in skills],
+            )
             self._event(db, run_id, None, "CREATED", None)
         return self.get_run(run_id)
+
+    def skill_bindings(self, run_id: str, step_id: str) -> list[dict[str, str]]:
+        with self.db.connect() as db:
+            rows = db.execute(
+                "SELECT skill_id,sha256,origin,approved_by "
+                "FROM workflow_skill_bindings WHERE run_id=? AND step_id=? "
+                "ORDER BY skill_id", (run_id, step_id),
+            ).fetchall()
+        return [dict(row) for row in rows]
 
     def task_input(self, run_id: str) -> WorkflowTaskInput | None:
         with self.db.connect() as db:

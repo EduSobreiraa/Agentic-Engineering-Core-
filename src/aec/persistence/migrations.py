@@ -372,6 +372,40 @@ MIGRATIONS = (
     BEFORE DELETE ON execution_scopes
     BEGIN SELECT RAISE(ABORT, 'execution scope is immutable'); END;
     """,
+    """
+    CREATE TABLE execution_settings (
+        execution_id TEXT PRIMARY KEY REFERENCES executions(execution_id),
+        requested_model TEXT NOT NULL,
+        reasoning_effort TEXT NOT NULL,
+        effective_model TEXT
+    );
+    """,
+    """
+    CREATE TABLE workflow_skill_bindings (
+        run_id TEXT NOT NULL REFERENCES workflow_runs(run_id),
+        step_id TEXT NOT NULL,
+        skill_id TEXT NOT NULL,
+        sha256 TEXT NOT NULL,
+        origin TEXT NOT NULL,
+        approved_by TEXT NOT NULL,
+        PRIMARY KEY(run_id,step_id,skill_id),
+        FOREIGN KEY(run_id,step_id) REFERENCES workflow_steps(run_id,step_id)
+    );
+    """,
+    """
+    CREATE TABLE run_execution_budgets (
+        run_id TEXT PRIMARY KEY,
+        content TEXT NOT NULL,
+        sha256 TEXT NOT NULL
+    );
+    """,
+    """
+    CREATE TABLE execution_concurrency_policy (
+        policy_id INTEGER PRIMARY KEY CHECK(policy_id=1),
+        version TEXT NOT NULL,
+        max_concurrency INTEGER NOT NULL CHECK(max_concurrency>0)
+    );
+    """,
 )
 
 

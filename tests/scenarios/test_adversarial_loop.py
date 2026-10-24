@@ -12,7 +12,12 @@ from aec.engineering.gates import CommandGate
 from aec.engineering.loop import AdversarialLoop
 from aec.execution.base import ExecutionAdapter
 from aec.execution.manager import ExecutionManager
-from aec.execution.models import ExecutionRequest, ExecutionResult, ExecutionStatus
+from aec.execution.models import (
+    ExecutionBudget,
+    ExecutionRequest,
+    ExecutionResult,
+    ExecutionStatus,
+)
 from aec.execution.policy import ExecutionPolicy
 from aec.methodology.contracts import MethodologyVersion
 from aec.methodology.governance import MethodologyRegistry
@@ -124,6 +129,7 @@ def setup(
     gate_fail: bool = False,
     high_hypothesis: bool = False,
     fake_evidence: bool = False,
+    budget: ExecutionBudget | None = None,
 ) -> tuple[AdversarialLoop, SimulatedAgents]:
     repository = tmp_path / "project"
     repository.mkdir()
@@ -165,6 +171,7 @@ def setup(
         [worktrees],
         policy=ExecutionPolicy((tmp_path,)),
         writable_agents=frozenset({"implementer"}),
+        budget=budget,
     )
     loop = AdversarialLoop(
         broker,
@@ -188,6 +195,16 @@ def setup(
         local_approvers=frozenset({"supervisor"}),
     )
     return loop, adapter
+
+
+def test_operational_policy_bounds_adversarial_iterations(tmp_path: Path) -> None:
+    budget = ExecutionBudget(
+        version="2", max_concurrent_agents=2, max_invocations_per_run=4,
+        max_retries=0, execution_timeout_seconds=120,
+        max_duration_seconds=1800, max_iterations=1,
+    )
+    with pytest.raises(ValueError, match="iteration count exceeds"):
+        setup(tmp_path, limit=2, budget=budget)
 
 
 def setup_published(

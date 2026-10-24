@@ -134,9 +134,60 @@ O [prompt de fechamento](methodology-worker/PHASE_6_CLOSURE_PROMPT.md) detalha o
 
 ## Fase 8: integrações e observabilidade
 
-- [ ] F8-01 Investigar integração programática com Orca.
-- [ ] F8-02 Investigar supervisão móvel de workflows.
-- [ ] F8-03 Adicionar executor Ollama.
-- [ ] F8-04 Implementar métricas consolidadas.
-- [ ] F8-05 Comparar qualidade entre metodologias.
-- [ ] F8-06 Avaliar suporte futuro a ambientes distribuídos.
+O pedido operacional de 2026-10-23 substituiu o escopo preliminar desta fase.
+Ollama e infraestrutura distribuída ficaram fora do escopo. O progresso e os
+limites estão em [baseline](operations/PHASE_8_BASELINE.md) e
+[verificação operacional](operations/PHASE_8.md).
+
+- [x] F8-00 Auditar as Fases 0–7, registrar baseline e matriz de prontidão.
+- [x] F8-01 Criar CLI local somente leitura para runs, agentes, aprovações,
+  processos, metodologias, timeline e JSON.
+- [x] F8-02 Consolidar contagens, duração e tokens reportados, sem estimativas.
+- [x] F8-03 Fixar orçamento versionado de invocações por run e bloquear antes
+  de iniciar turnos, com teste de reinício e decisão registrada. Fixar também
+  a concorrência por banco com vagas compartilhadas entre managers.
+- [x] F8-04 Selecionar modelo e esforço Codex por agente ou atribuição do
+  workflow, sem fallback silencioso; testar flags com fixture.
+- [x] F8-05 Inspecionar pstack, vincular uma skill aprovada por hash e executar
+  comparação controlada com Codex real somente leitura.
+- [x] F8-06 Investigar Orca e criar adapter local somente leitura para contexto
+  de worktree, com teste de filtragem e consulta ao CLI oficial.
+- [x] F8-07 Reutilizar o benchmark local em oito runs roteirizados e guardar
+  relatório estruturado com classificação inconclusiva.
+- [x] F8-08 Ampliar a política versionada para retries, timeout, duração e
+  iterações como tetos sobre os contratos existentes; exercitar concorrência e
+  orçamento em processos distintos e workspaces separados.
+- [x] F8-09 Executar Codex real com `--model` explícito, registrar resultado e
+  uso reportado; manter modelo efetivo como desconhecido quando ausente no CLI.
+- [ ] F8-10 Integrar a supervisão de runs AEC à interface Orca, se surgir
+  mecanismo público adequado; não habilitar aprovação remota.
+- [x] F8-11 Executar três tarefas pareadas com Codex real, com e sem skill,
+  preservar critérios e condições e registrar resultado INCONCLUSIVE.
+- [x] AEC-INT-001 Validar `skill.enable` no gateway, vínculo por digest,
+  atribuição ACP e pedido recebido pelo adapter Codex real.
+- [x] AEC-INT-002 Investigar a interface Orca 1.4.229; documentar BLOCKED para
+  supervisão de runs externos por ausência de contrato público encontrado.
+- [x] AEC-BENCH-001 Executar seis runs Codex reais em workspaces isolados,
+  três pares com gate idêntico e relatório rastreável.
+- [ ] Comparar versões metodológicas publicadas com mais repetições antes de
+  inferir eficácia; reavaliar Orca quando houver interface pública de runs externos.
+
+O Marco A da Fase 8 (Operational Core) foi verificado localmente na rodada OPS-001,
+OPS-003 e OPS-002, conforme [evidências](operations/OPS_HARDENING.md). A Fase 8
+permanece PARTIAL. O [Marco B](operations/INTEGRATED_WORKSPACE.md) comprovou
+o gateway pstack E2E e um benchmark Codex real inconclusivo. A supervisão dos
+runs AEC na interface Orca continua bloqueada pela interface documentada
+disponível; isolamento e separação de identidade também seguem pendentes.
+
+**Aceite de encerramento:** [Fase 8 PARTIAL](operations/PHASE_8_ACCEPTANCE.md),
+Marco A COMPLETE local supervisionado e Marco B PARTIAL. As entregas da Fase 8
+estão encerradas para esta rodada; nenhum merge, publicação metodológica ou
+início da fase seguinte foi realizado.
+
+**Pendências transferidas — produto:** supervisão dos runs AEC no Orca caso
+surja contrato público, acesso operacional mais conveniente e benchmarks entre
+versões metodológicas com mais tarefas, repetições e snapshot do código.
+
+**Pendências transferidas — segurança:** isolamento de SO para código não
+confiável, separação de privilégios para aprovação, supervisão ampliada de
+processos e desenho de aprovação remota confiável antes de qualquer ativação.

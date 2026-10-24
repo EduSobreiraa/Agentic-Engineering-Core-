@@ -66,6 +66,34 @@ TDD, auditoria estática, decisão adversarial e Arena têm definições version
 
 Para projetos locais confiáveis em Linux, o adapter Codex oferece supervisão opcional por scope do `systemd --user` (`supervise_with_systemd=True`), incluindo filhos que saem do PGID. Há também um gateway de aprovação por socket Unix que deriva o UID do operador. Sua fronteira de identidade requer serviço, operador e agentes com permissões separadas; essa implantação ainda não foi feita. Consulte [execução e recuperação](docs/execution/EXECUTION_LAYER.md) e [governança local](docs/methodology-worker/GOVERNANCE.md). Nenhum desses controles fornece sandbox ou autenticação remota.
 
+## Operação local (Fase 8 parcial)
+
+A CLI `aec` consulta um banco existente sem alterá-lo. Por exemplo:
+
+```bash
+uv run aec --database /tmp/aec.sqlite status
+uv run aec --database /tmp/aec.sqlite runs timeline RUN_ID
+uv run aec --database /tmp/aec.sqlite --json processes inspect RUN_ID
+```
+
+Ela também lista runs, agentes, aprovações pendentes e metodologias, inspeciona
+runs e resume métricas reportadas. `ExecutionBudget` permite limitar invocações
+por run. `CodexSettings` permite configurar modelo e esforço sem alterar a
+configuração global do Codex. Skills locais aprovadas podem ser vinculadas a um
+run por digest; o adapter Orca é opcional e somente leitura. Consulte os
+[comandos, evidências e limites da Fase 8](docs/operations/PHASE_8.md).
+
+O [Marco A de hardening operacional](docs/operations/OPS_HARDENING.md) verificou
+uma política de limites versão 2, orçamento e concorrência entre processos e
+um turno Codex real com modelo explícito. A Fase 8 permanece parcial.
+
+O [Marco B de integração](docs/operations/INTEGRATED_WORKSPACE.md) comprovou
+`skill.enable` pelo gateway até o pedido recebido pelo Codex e executou três
+pares de benchmark real, ainda inconclusivos. A interface Orca instalada não
+oferece contrato documentado para supervisionar runs AEC externos.
+O [aceite final da Fase 8](docs/operations/PHASE_8_ACCEPTANCE.md) classifica a
+entrega como PARTIAL e lista os critérios cumpridos e as pendências transferidas.
+
 ## Limites atuais
 
 O ACP v0.1 permanece independente de executores. A Execution Layer inicia processos e guarda estados. O Workflow Engine coordena grafos acíclicos; o ciclo adversarial controla repetições limitadas usando seus workflows. Execute `uv run pytest -q tests/scenarios/test_adversarial_loop.py` para o cenário simulado. Veja [o ciclo e suas limitações](docs/engineering/ADVERSARIAL_LOOP.md) e [a execução com Codex real](docs/engineering/REAL_CODEX_EXPERIMENT.md). Handles e aprovação local não autenticam usuários entre máquinas. Reinícios não repetem turnos externos de resultado incerto. Managers e controllers usam travas por execução no sistema de arquivos local. A Fase 5 gera relatórios sem LLM; propostas técnicas exigem revisão antes de alterar a documentação do projeto de destino.

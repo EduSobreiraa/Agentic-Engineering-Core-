@@ -413,3 +413,61 @@ Estas decisões foram aceitas no escopo inicial. Mudanças futuras devem acresce
 **Evidência:** testes executaram Codex simulado com descendente fora do PGID, recuperaram uma execução após `SIGKILL` do manager e confirmaram que o workspace continuou em quarentena. Um turno Codex real somente leitura passou em scope. Testes de socket cobriram UID permitido, UID desconhecido, ação proibida e rejeição de ator fornecido pelo cliente. Os gates finais estão em `.audit/local-supervision-verification.txt`.
 
 **Limites:** a scope não é sandbox de segurança e não reconstrói efeitos externos. O gateway só estabelece uma fronteira de identidade se o serviço, o operador e os processos agentes tiverem permissões separadas: agentes não podem usar o UID autorizado do operador nem acessar o socket, e clientes não podem escrever o SQLite ou chamar a API como a conta do serviço. A instalação atual não demonstra essa separação. Não há autenticação remota nem serviço instalado automaticamente. A Fase 8 permanece não iniciada.
+
+## ADR-042: Consultas operacionais locais sem mutação
+
+**Estado:** implementada na Fase 8 em 2026-10-23.
+
+**Contexto:** as tabelas do ACP, Workflow Engine, Execution Manager e Registry já guardam os fatos necessários para inspecionar runs, mas `Database(path)` migra o esquema ao abrir. Um comando de observação não deve modificar a fonte de verdade ou revelar prompts e sessões.
+
+**Decisão:** `OperationalReader` abre um SQLite existente com `mode=ro` e `query_only`, projeta campos permitidos e compõe timeline das tabelas persistidas. A CLI `aec` usa o leitor e oferece JSON indentado ou compacto. Estados futuros são marcados como desconhecidos. A observação de processo mostra `PRESENT` somente quando a identidade de `/proc` corresponde ao registro; em outros casos retorna `UNKNOWN` e não reconcilia.
+
+**Efeito:** o SQLite continua a fonte única de verdade. A CLI usa permissões de arquivo locais e não expõe o banco na rede. A timeline não preenche fatos ausentes e não substitui as políticas de recuperação da ADR-036 e ADR-041.
+
+## ADR-043: Orçamento versionado e seleção explícita do Codex
+
+**Estado:** implementada parcialmente na Fase 8 em 2026-10-23.
+
+**Contexto:** o manager já limita concorrência, e workflows já limitam duração e tentativas, mas não havia teto durável de invocações por run nem registro de modelo solicitado. Acrescentar campos com defaults a definições históricas mudaria seus hashes.
+
+**Decisão:** `ExecutionBudget` versão 1 fixa `max_invocations_per_run` e seu digest no SQLite no primeiro turno. A admissão usa o lock local existente, conta execuções persistidas e registra uma recusa antes de iniciar o adapter. `CodexSettings` define modelo e esforço por agente; metadados do workflow podem sobrescrevê-los na atribuição ACP. O manager valida os parâmetros e o Codex CLI recebe `--model` e `model_reasoning_effort` somente quando explícitos. O banco guarda o pedido e mantém modelo efetivo desconhecido quando o CLI não informa esse dado. Falha de modelo não inicia fallback.
+
+**Limites:** o teto de invocações foi testado com fixtures. Concorrência, timeout, retries e iterações continuam sob os contratos anteriores, sem política unificada nova. A disponibilidade de um modelo específico depende da assinatura e só é conhecida na execução. Não há fusão automática nem alteração de configuração global do Codex.
+
+**Complemento Fase 8:** as vagas de concorrência usam locks de arquivo compartilhados entre instâncias locais. O limite versão 1 é fixado no SQLite e managers com outro valor são recusados. Um teste com dois managers e workspaces distintos verificou a admissão serial com limite 1.
+
+## ADR-044: Skills opcionais e contexto Orca local
+
+**Estado:** capacidade local parcial implementada na Fase 8 em 2026-10-23.
+
+**Contexto:** skills pstack podem oferecer instruções úteis, mas não devem mudar uma metodologia publicada ou contornar autorização. O Orca oferece CLI documentado e pode devolver trechos de sessão em alguns comandos.
+
+**Decisão:** o `SkillRegistry` exige inspeção de arquivo, compatibilidade, permissões e habilitação por ator local. Cada run fixa ID, origem, aprovador e SHA-256 da skill; o motor revalida o arquivo antes de anexar as instruções à atribuição ACP. O adapter Orca chama apenas `worktree current --json`, exige host local e devolve campos permitidos. Ambos são opcionais. Nenhum endpoint remoto é iniciado.
+
+**Limites:** as instruções de uma skill não ganham autoridade sobre políticas superiores, mas seu conteúdo continua sendo entrada textual para o agente. O ensaio real `pstack:unslop` foi somente leitura e não demonstra aprovação local com UID separado. A CLI Orca não fornece, nesta integração, uma tela de runs AEC. A ausência de interface adequada deixa a supervisão desktop e móvel pendente.
+
+**Complemento Fase 8:** a habilitação operacional de skill é uma ação do `LocalApprovalGateway` (`skill.enable`), que deriva o ator do UID do socket e rejeita o campo `actor` do cliente. Chamadas diretas ao Registry continuam dentro da fronteira confiável do processo AEC, sob a limitação de implantação da ADR-041.
+
+## ADR-045: Tetos operacionais versionados e verificação local do Marco A
+
+**Estado:** adotada em 2026-10-24 para o núcleo operacional local.
+
+**Contexto:** a versão 1 de `ExecutionBudget` limita invocações por run, enquanto o Workflow Engine já possui limites de duração, paralelismo e retries seguros, e o ciclo adversarial possui um limite de iterações. Esses controles precisavam concordar sem alterar definições metodológicas publicadas nem repetir turnos externos de resultado incerto.
+
+**Decisão:** `ExecutionBudget` versão 2 exige tetos explícitos de concorrência, invocações, retries, timeout por turno, duração por run e iterações. O repositório preserva o JSON e SHA-256 da política por run. O manager recusa um turno que exceda timeout, duração ou invocações antes de chamar o adapter e registra `EXECUTION_BLOCKED`. O Workflow Engine recusa na criação definições que excedam paralelismo, duração, retries de validação ou timeout. O ciclo adversarial recusa um limite de iterações acima da política. Locks de vagas e a política de concorrência persistida coordenam managers locais em processos distintos. A versão 1 continua legível com a semântica anterior; não há fallback de modelo nem merge automático.
+
+**Evidência:** dois processos executaram em workspaces distintos com uma vaga compartilhada; o terceiro foi bloqueado após duas invocações persistidas. Um turno Codex real somente leitura com `--model gpt-6.1-sol` e esforço `medium` terminou `SUCCEEDED` e passou no gate textual. O banco registrou pedido, esforço, estado e uso reportado; o modelo efetivo permaneceu desconhecido porque o JSONL consumido pelo adapter não o identificou. Ruff, mypy e a suíte padrão passaram com 231 testes aprovados e 12 pulados.
+
+**Limites:** o teste concorrente usou adapter roteirizado; o ensaio Codex foi um único turno. A política versão 2 impõe tetos sobre contratos existentes, sem oferecer sandbox de sistema operacional ou inspeção infalível de descendentes. A aprovação local ainda carece de separação de UID em produção. O gateway pstack real, a supervisão dos runs AEC no Orca e benchmarks reais mais amplos continuam pendentes; portanto a Fase 8 permanece parcial.
+
+## ADR-046: Evidência de integração opcional e benchmark real do Marco B
+
+**Estado:** verificada parcialmente em 2026-10-24 para o ambiente local supervisionado.
+
+**Contexto:** a habilitação de skill pelo gateway tinha teste com fixture, enquanto a execução Codex real anterior habilitava a skill pela API local do Registry. O Orca fornecia contexto de worktree, mas não supervisão dos runs AEC. O benchmark anterior usava agentes roteirizados.
+
+**Decisão:** um ensaio de integração deve confirmar `skill.enable` no socket Unix, o digest fixado pelo Registry, a atribuição ACP e o mesmo prompt no pedido recebido pelo adapter Codex real. O Orca permanece integração opcional somente leitura; sem contrato público de runs externos na versão instalada, não será usado endpoint privado nem escrita de estado para simular supervisão. O benchmark real reutiliza `MethodologyEvaluator` para conferir pares com critérios e condições iguais, workspaces separados e classificação inconclusiva com uma repetição por braço.
+
+**Evidência e limites:** o caminho pstack E2E passou e seis runs Codex reais em três pares passaram nos gates. A observação do prompt é feita antes da chamada ao CLI e não mede o contexto interno do modelo. O benchmark compara a mesma definição experimental com e sem skill, não versões metodológicas publicadas; o modelo efetivo não foi reportado. A CLI Orca 1.4.229 não apresentou mecanismo documentado de importação ou assinatura de runs AEC externos. Serviço e operador ainda partilham UID neste ensaio. Consulte [o relatório do Marco B](../operations/INTEGRATED_WORKSPACE.md).
+
+**Revisão de aceite:** a ausência do contrato foi constatada somente na versão 1.4.229 e nas interfaces documentadas examinadas em 2026-10-24. Não é uma declaração de incompatibilidade permanente com o Orca. Uma interface pública futura pode ser reavaliada sem alterar o estado interno do aplicativo. A Fase 8 é aceita como PARTIAL; [matriz de critérios](../operations/PHASE_8_ACCEPTANCE.md).

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import re
 from datetime import datetime, timezone
@@ -19,12 +20,14 @@ from aec.communication.schemas import (
     TaskFailed,
     ValidationResult,
 )
+from aec.execution.base import ExecutionLimitExceeded, ModelPolicyError
 from aec.execution.locking import LocalLock, held
 from aec.execution.manager import ExecutionManager
 from aec.execution.models import ExecutionRequest, ExecutionResult, ExecutionStatus
 from aec.security.identities import Identity, Role
 
 if TYPE_CHECKING:
+    from aec.methodologies.skills import SkillRegistry
     from aec.methodology.governance import MethodologyRegistry
 
 from .loader import validate
@@ -60,6 +63,7 @@ class WorkflowEngine:
         workspaces: dict[str, Path] | None = None,
         local_approvers: frozenset[str] = frozenset(),
         approval_bindings: dict[str, Callable[[str], str]] | None = None,
+        skill_registry: SkillRegistry | None = None,
     ) -> None:
         broker._identity(orchestrator)
         broker._identity(quality_gate)
@@ -80,14 +84,16 @@ class WorkflowEngine:
         self.validators = validators
         self.local_approvers = local_approvers
         self.approval_bindings = approval_bindings or {}
+        self.skill_registry = skill_registry
         self.repository = WorkflowRepository(broker.db)
         self._active: set[str] = set()
         self._tasks: dict[str, asyncio.Task[WorkflowRun]] = {}
 
     def create(
-        self, definition: WorkflowDefinition, run_id: str | None = None
+        self, definition: WorkflowDefinition, run_id: str | None = None,
+        *, skills: dict[str, tuple[str, ...]] | None = None,
     ) -> WorkflowRun:
-        return self._create(definition, run_id, None)
+        return self._create(definition, run_id, None, skills=skills)
 
     def _create(
         self,
@@ -95,8 +101,26 @@ class WorkflowEngine:
         run_id: str | None,
         binding: tuple[str, str, str] | None,
         task_input: WorkflowTaskInput | None = None,
+        skills: dict[str, tuple[str, ...]] | None = None,
     ) -> WorkflowRun:
         validate(definition)
+        budget = self.manager.budget
+        if budget is not None and budget.version == "2":
+            assert budget.max_concurrent_agents is not None
+            assert budget.max_retries is not None
+            assert budget.execution_timeout_seconds is not None
+            assert budget.max_duration_seconds is not None
+            if (
+                definition.limits.max_parallel_steps > budget.max_concurrent_agents
+                or definition.limits.max_duration_seconds > budget.max_duration_seconds
+                or any(
+                    step.retry_policy.max_attempts - 1 > budget.max_retries
+                    or (step.timeout_seconds or 120)
+                    > budget.execution_timeout_seconds
+                    for step in definition.steps
+                )
+            ):
+                raise ExecutionLimitExceeded("workflow exceeds execution policy")
         binding_name = definition.metadata.get("approval_binding")
         if binding_name and binding_name not in self.approval_bindings:
             raise ValueError("approval binding is not registered")
@@ -115,8 +139,34 @@ class WorkflowEngine:
                     raise ValueError("QA needs read-only mode and artifact_id")
             if step.type == "validation" and step.validator not in self.validators:
                 raise ValueError("validator is not registered")
+        skill_bindings: list[tuple[str, str, str, str, str]] = []
+        by_id = {step.id: step for step in definition.steps}
+        for step_id, identifiers in (skills or {}).items():
+            from aec.methodologies.skills import SkillUnavailableError
+
+            target_step = by_id.get(step_id)
+            if (
+                target_step is None
+                or target_step.type != "agent"
+                or target_step.executor is None
+            ):
+                raise ValueError("skills require an agent step")
+            if len(set(identifiers)) != len(identifiers):
+                raise ValueError("duplicate skill binding")
+            if self.skill_registry is None:
+                raise SkillUnavailableError("skill registry is unavailable")
+            for identifier in identifiers:
+                reference = self.skill_registry.resolve(
+                    identifier, target_step.executor,
+                    frozenset({target_step.sandbox_mode}),
+                )
+                skill_bindings.append((
+                    step_id, identifier, reference.sha256, reference.origin,
+                    self.skill_registry.approved_by[identifier],
+                ))
         run = self.repository.create(
-            run_id or str(uuid4()), definition, binding, task_input
+            run_id or str(uuid4()), definition, binding, task_input,
+            tuple(skill_bindings),
         )
         self.repository.workflow_status(run.run_id, WorkflowStatus.VALIDATED)
         return self.repository.get_run(run.run_id)
@@ -129,6 +179,7 @@ class WorkflowEngine:
         run_id: str | None = None,
         *,
         task_input: WorkflowTaskInput,
+        skills: dict[str, tuple[str, ...]] | None = None,
     ) -> WorkflowRun:
         if Path(registry.db.path).resolve() != Path(self.broker.db.path).resolve():
             raise ValueError("registry and workflow must share a database")
@@ -146,6 +197,37 @@ class WorkflowEngine:
             run_id,
             (methodology_id, version, str(row["sha256"])),
             task_input,
+            skills,
+        )
+
+    def _skill_prompt(self, run_id: str, step: WorkflowStep, prompt: str) -> str:
+        from aec.methodologies.skills import SkillUnavailableError
+
+        bindings = self.repository.skill_bindings(run_id, step.id)
+        if not bindings:
+            return prompt
+        if self.skill_registry is None or step.executor is None:
+            raise SkillUnavailableError("skill registry is unavailable")
+        instructions = []
+        for binding in bindings:
+            reference = self.skill_registry.resolve(
+                binding["skill_id"], step.executor,
+                frozenset({step.sandbox_mode}),
+            )
+            if (reference.sha256 != binding["sha256"]
+                    or reference.origin != binding["origin"]
+                    or self.skill_registry.approved_by[binding["skill_id"]]
+                    != binding["approved_by"]):
+                raise SkillUnavailableError("skill binding changed")
+            content = reference.instruction_files[0].read_bytes()
+            if hashlib.sha256(content).hexdigest() != binding["sha256"]:
+                raise SkillUnavailableError("skill instructions changed")
+            instructions.append(content.decode("utf-8"))
+        return (
+            prompt
+            + "\n\nApproved optional skill instructions. "
+            + "Higher AEC policies still apply:\n"
+            + "\n\n".join(instructions)
         )
 
     def _ready(
@@ -284,6 +366,8 @@ class WorkflowEngine:
                 return
 
     async def _agent_step(self, run_id: str, step: WorkflowStep) -> None:
+        from aec.methodologies.skills import SkillUnavailableError
+
         assert step.agent is not None and step.executor is not None
         identity = self.agents[step.agent]
         if identity.role not in {Role.IMPLEMENTER, Role.QA}:
@@ -297,6 +381,14 @@ class WorkflowEngine:
         self.repository.step_status(
             run_id, step.id, StepStatus.RUNNING, execution_id=execution_id
         )
+        try:
+            prompt = self._skill_prompt(run_id, step, prompt)
+        except SkillUnavailableError as exc:
+            self.repository.step_status(
+                run_id, step.id, StepStatus.FAILED,
+                result={"error": type(exc).__name__},
+            )
+            return
         is_review = identity.role == Role.QA
         message = Message(
             protocol="ACP",
@@ -350,6 +442,12 @@ class WorkflowEngine:
                 run_id, step.id, status, result={"error": "cancelled"}
             )
             raise
+        except (ExecutionLimitExceeded, ModelPolicyError) as exc:
+            self.repository.step_status(
+                run_id, step.id, StepStatus.FAILED,
+                result={"error": type(exc).__name__},
+            )
+            return
         except Exception as exc:
             self.repository.step_status(
                 run_id,

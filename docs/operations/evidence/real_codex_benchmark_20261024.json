@@ -1,0 +1,274 @@
+{
+  "classification": "INCONCLUSIVE",
+  "gateway": {
+    "skill_id": "pstack:unslop",
+    "status": "ENABLED"
+  },
+  "git_commit": "dcbb1d7325a5ec62c7eaf72c31306ea10c6d9b69",
+  "intervention": "pstack:unslop",
+  "methodology_id": "phase8-skill-experiment",
+  "methodology_version": "1.0.0",
+  "outcomes": {
+    "baseline": {
+      "accepted": 3,
+      "invocations": 3,
+      "runs": 3
+    },
+    "candidate": {
+      "accepted": 3,
+      "invocations": 3,
+      "runs": 3
+    }
+  },
+  "paired_acceptance_equal": true,
+  "pairs": [
+    {
+      "acceptance_sha256": "b3d42dd884e5588fa343c0e54dd44ecb7b203bbe6f626b5b2cacc0f234041d9c",
+      "baseline": 1.0,
+      "candidate": 1.0,
+      "conditions": "sha256:cebdc18f55317b101c65a96cbe4e7284d8cca1ce5c199f460daf1fb13bc604de",
+      "task_id": "migration-1"
+    },
+    {
+      "acceptance_sha256": "33b563935db86bcf40582b8880d3e200f33a17ae2c4dc8d3efeae944c366fd98",
+      "baseline": 1.0,
+      "candidate": 1.0,
+      "conditions": "sha256:686416b09e84378e0465ae8036322acbf3ff2f0c1eecfddbde38669189340117",
+      "task_id": "active-voice-1"
+    },
+    {
+      "acceptance_sha256": "e7bc9507fb6f0937c311f273f9cce8f25beb0b052c91d523728ce65971bc7985",
+      "baseline": 1.0,
+      "candidate": 1.0,
+      "conditions": "sha256:bc8121de00fa7860b18588102d7f5c6679c93d398943f5ff2f9097fd3ded5723",
+      "task_id": "concise-action-1"
+    }
+  ],
+  "reason": "One run per arm and three writing tasks cannot establish superiority.",
+  "requested_model": "gpt-6.1-sol",
+  "runs": [
+    {
+      "acceptance_sha256": "b3d42dd884e5588fa343c0e54dd44ecb7b203bbe6f626b5b2cacc0f234041d9c",
+      "accepted": true,
+      "agent_invocations": 1,
+      "arm": "baseline",
+      "conditions_sha256": "cebdc18f55317b101c65a96cbe4e7284d8cca1ce5c199f460daf1fb13bc604de",
+      "database_path": "/tmp/aec-bench-real-20261024/migration/baseline/aec.sqlite",
+      "database_sha256": "88924c549eb0346fab33c70ab08e7e0e6a9fdafe8d5150b35d093c881b26cda0",
+      "definition_sha256": "401e8d51e84f6eb35e15898e8ab3b448b23a70058af0bb058f282457917c73fc",
+      "duration_seconds": 5.710374956000123,
+      "effective_model": null,
+      "executed_definition_sha256": "401e8d51e84f6eb35e15898e8ab3b448b23a70058af0bb058f282457917c73fc",
+      "failure": null,
+      "gate_passed": true,
+      "methodology_version": "1.0.0",
+      "output": "The team used several methods to make the migration easier.",
+      "output_sha256": "a9e41cfe0e641ebd241959e3de4d2b117e0259fb1b13127b59499bf2851e1fa6",
+      "prompt_sha256": "693a81c48686924773534eea721074d0afa56ce40c78be511546d4bd5d0c9adc",
+      "reasoning_effort": "medium",
+      "repetition": 1,
+      "requested_model": "gpt-6.1-sol",
+      "review_iterations": null,
+      "run_id": "migration-baseline",
+      "skill_sha256": null,
+      "task_id": "migration",
+      "usage": [
+        {
+          "cache_write_input_tokens": 0,
+          "cached_input_tokens": 13184,
+          "input_tokens": 23478,
+          "output_tokens": 15,
+          "reasoning_output_tokens": 0
+        }
+      ],
+      "workflow_status": "COMPLETED",
+      "workspace_path": "/tmp/aec-bench-real-20261024/migration/baseline/workspace"
+    },
+    {
+      "acceptance_sha256": "b3d42dd884e5588fa343c0e54dd44ecb7b203bbe6f626b5b2cacc0f234041d9c",
+      "accepted": true,
+      "agent_invocations": 1,
+      "arm": "candidate",
+      "conditions_sha256": "cebdc18f55317b101c65a96cbe4e7284d8cca1ce5c199f460daf1fb13bc604de",
+      "database_path": "/tmp/aec-bench-real-20261024/migration/candidate/aec.sqlite",
+      "database_sha256": "c29352f8abab82e6acd9ce4232c605d24fcaa77dfa4c1d35e2f0bec604bd3911",
+      "definition_sha256": "401e8d51e84f6eb35e15898e8ab3b448b23a70058af0bb058f282457917c73fc",
+      "duration_seconds": 6.82019348599988,
+      "effective_model": null,
+      "executed_definition_sha256": "401e8d51e84f6eb35e15898e8ab3b448b23a70058af0bb058f282457917c73fc",
+      "failure": null,
+      "gate_passed": true,
+      "methodology_version": "1.0.0",
+      "output": "The team used several methods to help with the migration.",
+      "output_sha256": "c5acb7ec0afff0cdc029a973c568cb8d9f05db812bed68eb5438607ceb3761f9",
+      "prompt_sha256": "693a81c48686924773534eea721074d0afa56ce40c78be511546d4bd5d0c9adc",
+      "reasoning_effort": "medium",
+      "repetition": 1,
+      "requested_model": "gpt-6.1-sol",
+      "review_iterations": null,
+      "run_id": "migration-candidate",
+      "skill_sha256": "0503149a9b85dad02bbc747a3aeb534e2ba07f53c5fd57e491ea3d1e67659aa3",
+      "task_id": "migration",
+      "usage": [
+        {
+          "cache_write_input_tokens": 0,
+          "cached_input_tokens": 13184,
+          "input_tokens": 24880,
+          "output_tokens": 30,
+          "reasoning_output_tokens": 13
+        }
+      ],
+      "workflow_status": "COMPLETED",
+      "workspace_path": "/tmp/aec-bench-real-20261024/migration/candidate/workspace"
+    },
+    {
+      "acceptance_sha256": "33b563935db86bcf40582b8880d3e200f33a17ae2c4dc8d3efeae944c366fd98",
+      "accepted": true,
+      "agent_invocations": 1,
+      "arm": "candidate",
+      "conditions_sha256": "686416b09e84378e0465ae8036322acbf3ff2f0c1eecfddbde38669189340117",
+      "database_path": "/tmp/aec-bench-real-20261024/active-voice/candidate/aec.sqlite",
+      "database_sha256": "ba026d245c0def5c9c53553221969905c102d488dee20a2c975a9e3980249a2e",
+      "definition_sha256": "743192c2bc4d10044f38bd8b36bc5cdc21ecff59b491a776b860fc56f16248bd",
+      "duration_seconds": 9.395793438000055,
+      "effective_model": null,
+      "executed_definition_sha256": "743192c2bc4d10044f38bd8b36bc5cdc21ecff59b491a776b860fc56f16248bd",
+      "failure": null,
+      "gate_passed": true,
+      "methodology_version": "1.0.0",
+      "output": "The team reviewed the report yesterday.",
+      "output_sha256": "0c749187f8f0117ee71facaccd9ec95200501d4adbeba5a093db7d78fdc6760c",
+      "prompt_sha256": "3b331ff3804803d4c40a6e7e440a453cf12a6afe47f752fc38a88212017f9922",
+      "reasoning_effort": "medium",
+      "repetition": 1,
+      "requested_model": "gpt-6.1-sol",
+      "review_iterations": null,
+      "run_id": "active-voice-candidate",
+      "skill_sha256": "0503149a9b85dad02bbc747a3aeb534e2ba07f53c5fd57e491ea3d1e67659aa3",
+      "task_id": "active-voice",
+      "usage": [
+        {
+          "cache_write_input_tokens": 0,
+          "cached_input_tokens": 13184,
+          "input_tokens": 24876,
+          "output_tokens": 11,
+          "reasoning_output_tokens": 0
+        }
+      ],
+      "workflow_status": "COMPLETED",
+      "workspace_path": "/tmp/aec-bench-real-20261024/active-voice/candidate/workspace"
+    },
+    {
+      "acceptance_sha256": "33b563935db86bcf40582b8880d3e200f33a17ae2c4dc8d3efeae944c366fd98",
+      "accepted": true,
+      "agent_invocations": 1,
+      "arm": "baseline",
+      "conditions_sha256": "686416b09e84378e0465ae8036322acbf3ff2f0c1eecfddbde38669189340117",
+      "database_path": "/tmp/aec-bench-real-20261024/active-voice/baseline/aec.sqlite",
+      "database_sha256": "a23e863a91a1adbf3faf278666f455aa488d8355c8f51ee9cf9dd616ab02bef0",
+      "definition_sha256": "743192c2bc4d10044f38bd8b36bc5cdc21ecff59b491a776b860fc56f16248bd",
+      "duration_seconds": 6.524785718999965,
+      "effective_model": null,
+      "executed_definition_sha256": "743192c2bc4d10044f38bd8b36bc5cdc21ecff59b491a776b860fc56f16248bd",
+      "failure": null,
+      "gate_passed": true,
+      "methodology_version": "1.0.0",
+      "output": "The team reviewed the report yesterday.",
+      "output_sha256": "0c749187f8f0117ee71facaccd9ec95200501d4adbeba5a093db7d78fdc6760c",
+      "prompt_sha256": "3b331ff3804803d4c40a6e7e440a453cf12a6afe47f752fc38a88212017f9922",
+      "reasoning_effort": "medium",
+      "repetition": 1,
+      "requested_model": "gpt-6.1-sol",
+      "review_iterations": null,
+      "run_id": "active-voice-baseline",
+      "skill_sha256": null,
+      "task_id": "active-voice",
+      "usage": [
+        {
+          "cache_write_input_tokens": 0,
+          "cached_input_tokens": 21632,
+          "input_tokens": 23474,
+          "output_tokens": 11,
+          "reasoning_output_tokens": 0
+        }
+      ],
+      "workflow_status": "COMPLETED",
+      "workspace_path": "/tmp/aec-bench-real-20261024/active-voice/baseline/workspace"
+    },
+    {
+      "acceptance_sha256": "e7bc9507fb6f0937c311f273f9cce8f25beb0b052c91d523728ce65971bc7985",
+      "accepted": true,
+      "agent_invocations": 1,
+      "arm": "baseline",
+      "conditions_sha256": "bc8121de00fa7860b18588102d7f5c6679c93d398943f5ff2f9097fd3ded5723",
+      "database_path": "/tmp/aec-bench-real-20261024/concise-action/baseline/aec.sqlite",
+      "database_sha256": "0cae515bbd5aa1d0e8d685bc16dbb9fe7052a25f0972ae34a9943f28f2923151",
+      "definition_sha256": "d414d8f6abd55e469628d0cf5eb0bd29b34e61f97e3977a0d91eec6869789cf6",
+      "duration_seconds": 5.515581451000116,
+      "effective_model": null,
+      "executed_definition_sha256": "d414d8f6abd55e469628d0cf5eb0bd29b34e61f97e3977a0d91eec6869789cf6",
+      "failure": null,
+      "gate_passed": true,
+      "methodology_version": "1.0.0",
+      "output": "To begin the test, we need to choose a configuration.",
+      "output_sha256": "5287ec52ea7c875636f5303bc553c2f9091d52eef41b38654578abe77e77efe3",
+      "prompt_sha256": "46f4b299ed9ff553beff05e474e9747002011e9953281a11caaaa8c710abb787",
+      "reasoning_effort": "medium",
+      "repetition": 1,
+      "requested_model": "gpt-6.1-sol",
+      "review_iterations": null,
+      "run_id": "concise-action-baseline",
+      "skill_sha256": null,
+      "task_id": "concise-action",
+      "usage": [
+        {
+          "cache_write_input_tokens": 0,
+          "cached_input_tokens": 13184,
+          "input_tokens": 23482,
+          "output_tokens": 16,
+          "reasoning_output_tokens": 0
+        }
+      ],
+      "workflow_status": "COMPLETED",
+      "workspace_path": "/tmp/aec-bench-real-20261024/concise-action/baseline/workspace"
+    },
+    {
+      "acceptance_sha256": "e7bc9507fb6f0937c311f273f9cce8f25beb0b052c91d523728ce65971bc7985",
+      "accepted": true,
+      "agent_invocations": 1,
+      "arm": "candidate",
+      "conditions_sha256": "bc8121de00fa7860b18588102d7f5c6679c93d398943f5ff2f9097fd3ded5723",
+      "database_path": "/tmp/aec-bench-real-20261024/concise-action/candidate/aec.sqlite",
+      "database_sha256": "d6d734f82b7c68afd2c20cda12f66741ea588a90279aeaae05775c9078f87149",
+      "definition_sha256": "d414d8f6abd55e469628d0cf5eb0bd29b34e61f97e3977a0d91eec6869789cf6",
+      "duration_seconds": 13.210627029999841,
+      "effective_model": null,
+      "executed_definition_sha256": "d414d8f6abd55e469628d0cf5eb0bd29b34e61f97e3977a0d91eec6869789cf6",
+      "failure": null,
+      "gate_passed": true,
+      "methodology_version": "1.0.0",
+      "output": "We need to choose the configuration before starting the test.",
+      "output_sha256": "997eeb5df6a08dd1e5ba455cb5e06b411dc1a7b0865ade79cbf517ddc443c7fe",
+      "prompt_sha256": "46f4b299ed9ff553beff05e474e9747002011e9953281a11caaaa8c710abb787",
+      "reasoning_effort": "medium",
+      "repetition": 1,
+      "requested_model": "gpt-6.1-sol",
+      "review_iterations": null,
+      "run_id": "concise-action-candidate",
+      "skill_sha256": "0503149a9b85dad02bbc747a3aeb534e2ba07f53c5fd57e491ea3d1e67659aa3",
+      "task_id": "concise-action",
+      "usage": [
+        {
+          "cache_write_input_tokens": 0,
+          "cached_input_tokens": 13184,
+          "input_tokens": 24884,
+          "output_tokens": 51,
+          "reasoning_output_tokens": 34
+        }
+      ],
+      "workflow_status": "COMPLETED",
+      "workspace_path": "/tmp/aec-bench-real-20261024/concise-action/candidate/workspace"
+    }
+  ],
+  "skill_sha256": "0503149a9b85dad02bbc747a3aeb534e2ba07f53c5fd57e491ea3d1e67659aa3"
+}

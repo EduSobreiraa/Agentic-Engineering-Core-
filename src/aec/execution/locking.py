@@ -44,3 +44,24 @@ async def held(database_path: str, key: str) -> AsyncIterator[None]:
         yield
     finally:
         lock.close()
+
+
+@asynccontextmanager
+async def held_slot(database_path: str, slots: int) -> AsyncIterator[None]:
+    """Reserve one process-shared execution slot for the adapter's lifetime."""
+    locks = [
+        LocalLock(database_path, f"execution-slot:{index}") for index in range(slots)
+    ]
+    acquired: LocalLock | None = None
+    try:
+        while acquired is None:
+            for lock in locks:
+                if lock.try_acquire():
+                    acquired = lock
+                    break
+            if acquired is None:
+                await asyncio.sleep(0.05)
+        yield
+    finally:
+        for lock in locks:
+            lock.close()

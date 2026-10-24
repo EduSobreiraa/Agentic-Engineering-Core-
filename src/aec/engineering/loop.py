@@ -70,6 +70,12 @@ class AdversarialLoop:
             or len({gate.gate_id for gate in gates}) != len(gates)
         ):
             raise ValueError("positive iteration limit, executor and gates required")
+        if (
+            manager.budget is not None and manager.budget.version == "2"
+            and manager.budget.max_iterations is not None
+            and max_iterations > manager.budget.max_iterations
+        ):
+            raise ValueError("iteration count exceeds execution policy")
         self.broker = broker
         self.manager = manager
         self.orchestrator = orchestrator
